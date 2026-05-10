@@ -12,19 +12,19 @@ public sealed class DockerTools
     }
 
     [McpServerTool]
-    [Description("List containers managed by this MCP server. Only containers with managed-by=ai-mcp are returned.")]
+    [Description("List Docker containers.")]
     public async Task<IReadOnlyList<object>> ListContainers()
     {
-        return await _docker.ListManagedContainersAsync();
+        return await _docker.ListContainersAsync();
     }
 
     [McpServerTool]
-    [Description("Create a restricted Docker container from an allowed image. Container name must start with ai-sandbox-.")]
+    [Description("Create a restricted Docker container from an allowed image.")]
     public async Task<object> CreateContainer(
         [Description("Allowed images: nginx:alpine, redis:7-alpine, python:3.12-alpine, alpine:latest, hello-world:latest, hello-world")]
         string image,
 
-        [Description("Container name. Must start with ai-sandbox-. Example: ai-sandbox-nginx-1")]
+        [Description("Container name.")]
         string name,
 
         [Description("Optional command. Keep simple, for example: sleep 60")]
@@ -40,21 +40,21 @@ public sealed class DockerTools
     }
 
     [McpServerTool]
-    [Description("Start a managed Docker container. The container must have managed-by=ai-mcp and name must start with ai-sandbox-.")]
+    [Description("Start a Docker container.")]
     public async Task<object> StartContainer(string name)
     {
         return await _docker.StartContainerAsync(name);
     }
 
     [McpServerTool]
-    [Description("Stop a managed Docker container. The container must have managed-by=ai-mcp and name must start with ai-sandbox-.")]
+    [Description("Stop a Docker container.")]
     public async Task<object> StopContainer(string name)
     {
         return await _docker.StopContainerAsync(name);
     }
 
     [McpServerTool]
-    [Description("Remove a managed Docker container. The container must have managed-by=ai-mcp and name must start with ai-sandbox-.")]
+    [Description("Remove a Docker container.")]
     public async Task<object> RemoveContainer(
         string name,
 
@@ -65,7 +65,7 @@ public sealed class DockerTools
     }
 
     [McpServerTool]
-    [Description("Get logs from a managed Docker container. Maximum tail is 500 lines.")]
+    [Description("Get logs from a Docker container. Maximum tail is 500 lines.")]
     public async Task<string> GetContainerLogs(string name, int tail = 100)
     {
         return await _docker.GetLogsAsync(name, tail);

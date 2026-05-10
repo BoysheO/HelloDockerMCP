@@ -1,9 +1,5 @@
 public sealed class DockerGuard
 {
-    public const string ManagedLabelKey = "managed-by";
-    public const string ManagedLabelValue = "ai-mcp";
-    public const string RequiredNamePrefix = "ai-sandbox-";
-
     private static readonly HashSet<string> AllowedImages = new(StringComparer.OrdinalIgnoreCase)
     {
         "nginx:alpine",
@@ -23,18 +19,6 @@ public sealed class DockerGuard
         }
     }
 
-    public void ValidateContainerName(string name)
-    {
-        if (string.IsNullOrWhiteSpace(name))
-            throw new InvalidOperationException("Container name is required.");
-
-        if (!name.StartsWith(RequiredNamePrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException(
-                $"Container name must start with '{RequiredNamePrefix}'.");
-        }
-    }
-
     public void ValidateResourceLimits(long memoryMb, double cpus)
     {
         if (memoryMb < 64 || memoryMb > 1024)
@@ -42,17 +26,5 @@ public sealed class DockerGuard
 
         if (cpus <= 0 || cpus > 2)
             throw new InvalidOperationException("CPU limit must be greater than 0 and no more than 2.");
-    }
-
-    public bool IsManaged(IDictionary<string, string>? labels)
-    {
-        return labels is not null
-            && labels.TryGetValue(ManagedLabelKey, out var value)
-            && value == ManagedLabelValue;
-    }
-
-    public string ManagedLabelFilter()
-    {
-        return $"{ManagedLabelKey}={ManagedLabelValue}";
     }
 }

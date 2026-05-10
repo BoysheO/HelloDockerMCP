@@ -20,19 +20,12 @@ public sealed class DockerService
             : new DockerClientConfiguration(new Uri(dockerHost)).CreateClient();
     }
 
-    public async Task<IReadOnlyList<object>> ListManagedContainersAsync()
+    public async Task<IReadOnlyList<object>> ListContainersAsync()
     {
         var containers = await _client.Containers.ListContainersAsync(
             new ContainersListParameters
             {
-                All = true,
-                Filters = new Dictionary<string, IDictionary<string, bool>>
-                {
-                    ["label"] = new Dictionary<string, bool>
-                    {
-                        [_guard.ManagedLabelFilter()] = true
-                    }
-                }
+                All = true
             });
 
         return containers.Select(c => new
@@ -54,7 +47,7 @@ public sealed class DockerService
         double cpus)
     {
         _guard.ValidateImage(image);
-        _guard.ValidateContainerName(name);
+        EnsureContainerNameProvided(name);
         _guard.ValidateResourceLimits(memoryMb, cpus);
 
         // 可选：先拉镜像。生产环境建议加 registry 白名单。
@@ -73,11 +66,6 @@ public sealed class DockerService
             Cmd = string.IsNullOrWhiteSpace(command)
                 ? null
                 : SplitCommand(command),
-
-            Labels = new Dictionary<string, string>
-            {
-                [DockerGuard.ManagedLabelKey] = DockerGuard.ManagedLabelValue
-            },
 
             HostConfig = new HostConfig
             {
@@ -117,7 +105,7 @@ public sealed class DockerService
 
     public async Task<object> StartContainerAsync(string name)
     {
-        var container = await GetManagedContainerByNameAsync(name);
+        var container = await GetContainerByNameAsync(name);
 
         var started = await _client.Containers.StartContainerAsync(
             container.ID,
@@ -133,7 +121,7 @@ public sealed class DockerService
 
     public async Task<object> StopContainerAsync(string name)
     {
-        var container = await GetManagedContainerByNameAsync(name);
+        var container = await GetContainerByNameAsync(name);
 
         var stopped = await _client.Containers.StopContainerAsync(
             container.ID,
@@ -152,7 +140,7 @@ public sealed class DockerService
 
     public async Task<object> RemoveContainerAsync(string name, bool force = false)
     {
-        var container = await GetManagedContainerByNameAsync(name);
+        var container = await GetContainerByNameAsync(name);
 
         await _client.Containers.RemoveContainerAsync(
             container.ID,
@@ -173,7 +161,7 @@ public sealed class DockerService
 
 public async Task<string> GetLogsAsync(string name, int tail)
 {
-    var container = await GetManagedContainerByNameAsync(name);
+    var container = await GetContainerByNameAsync(name);
 
     tail = Math.Clamp(tail, 1, 500);
 
@@ -210,9 +198,9 @@ public async Task<string> GetLogsAsync(string name, int tail)
         : output.ToString();
 }
 
-    private async Task<ContainerListResponse> GetManagedContainerByNameAsync(string name)
+    private async Task<ContainerListResponse> GetContainerByNameAsync(string name)
     {
-        _guard.ValidateContainerName(name);
+        EnsureContainerNameProvided(name);
 
         var containers = await _client.Containers.ListContainersAsync(
             new ContainersListParameters
@@ -223,10 +211,6 @@ public async Task<string> GetLogsAsync(string name, int tail)
                     ["name"] = new Dictionary<string, bool>
                     {
                         [name] = true
-                    },
-                    ["label"] = new Dictionary<string, bool>
-                    {
-                        [_guard.ManagedLabelFilter()] = true
                     }
                 }
             });
@@ -234,9 +218,15 @@ public async Task<string> GetLogsAsync(string name, int tail)
         var container = containers.FirstOrDefault();
 
         if (container is null)
-            throw new InvalidOperationException($"Managed container not found: {name}");
+            throw new InvalidOperationException($"Container not found: {name}");
 
         return container;
+    }
+
+    private static void EnsureContainerNameProvided(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            throw new InvalidOperationException("Container name is required.");
     }
 
     private static IList<string> SplitCommand(string command)
