@@ -66,6 +66,7 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddSingleton<DockerGuard>();
 builder.Services.AddSingleton<DockerService>();
 builder.Services.AddSingleton<StorageService>();
+builder.Services.AddHealthChecks();
 
 builder.Services
     .AddMcpServer()
@@ -76,6 +77,8 @@ var app = builder.Build();
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+app.MapHealthChecks("/health").AllowAnonymous();
 
 app.MapGet("/.well-known/oauth-protected-resource/mcp", (
     HttpContext context,

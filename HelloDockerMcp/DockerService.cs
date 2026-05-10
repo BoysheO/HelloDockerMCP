@@ -15,10 +15,12 @@ public sealed class DockerService
 
     private readonly DockerClient _client;
     private readonly DockerGuard _guard;
+    private readonly StorageService _storage;
 
-    public DockerService(DockerGuard guard)
+    public DockerService(DockerGuard guard, StorageService storage)
     {
         _guard = guard;
+        _storage = storage;
 
         // Docker.DotNet can auto-connect to local Docker.
         var dockerHost = Environment.GetEnvironmentVariable("DOCKER_HOST");
@@ -77,7 +79,10 @@ public sealed class DockerService
         string? name,
         JsonElement? command,
         long memoryMb,
-        double cpus)
+        double cpus,
+        string? storagePath = null,
+        string? containerPath = null,
+        bool storageReadOnly = false)
     {
         try
         {
@@ -87,11 +92,12 @@ public sealed class DockerService
                 : name.Trim();
             _guard.ValidateResourceLimits(memoryMb, cpus);
             var argv = ParseCommand(command);
+            var storageBind = ResolveStorageDirectoryBind(storagePath, containerPath, storageReadOnly);
 
             await PullImageAsync(normalizedImage);
 
             var result = await _client.Containers.CreateContainerAsync(
-                CreateParameters(normalizedImage, containerName, argv, memoryMb, cpus, autoRemove: false));
+                CreateParameters(normalizedImage, containerName, argv, memoryMb, cpus, autoRemove: false, storageBind: storageBind));
 
             return new
             {
@@ -100,6 +106,7 @@ public sealed class DockerService
                 name = containerName,
                 image = normalizedImage,
                 command = argv,
+                storageMount = storageBind,
                 created = true
             };
         }
@@ -209,7 +216,10 @@ public sealed class DockerService
         long memoryMb,
         double cpus,
         int timeoutSeconds,
-        bool autoRemove)
+        bool autoRemove,
+        string? storagePath = null,
+        string? containerPath = null,
+        bool storageReadOnly = false)
     {
         var stopwatch = Stopwatch.StartNew();
         string? containerId = null;
@@ -226,11 +236,12 @@ public sealed class DockerService
             _guard.ValidateResourceLimits(memoryMb, cpus);
             timeoutSeconds = ValidateTimeout(timeoutSeconds, 1, 300);
             var argv = ParseCommand(command);
+            var storageBind = ResolveStorageDirectoryBind(storagePath, containerPath, storageReadOnly);
 
             await PullImageAsync(normalizedImage);
 
             var createResult = await _client.Containers.CreateContainerAsync(
-                CreateParameters(normalizedImage, containerName, argv, memoryMb, cpus, autoRemove: false));
+                CreateParameters(normalizedImage, containerName, argv, memoryMb, cpus, autoRemove: false, storageBind: storageBind));
             containerId = createResult.ID;
 
             var started = await _client.Containers.StartContainerAsync(containerId, new ContainerStartParameters());
@@ -278,6 +289,7 @@ public sealed class DockerService
                     id = ShortId(containerId),
                     name = containerName,
                     image = normalizedImage,
+                    storageMount = storageBind,
                     exitCode,
                     logs.stdout,
                     logs.stderr,
@@ -298,6 +310,7 @@ public sealed class DockerService
                 id = ShortId(containerId),
                 name = containerName,
                 image = normalizedImage,
+                storageMount = storageBind,
                 exitCode,
                 logs.stdout,
                 logs.stderr,
@@ -716,8 +729,15 @@ public sealed class DockerService
         IList<string>? command,
         long memoryMb,
         double cpus,
-        bool autoRemove)
+        bool autoRemove,
+        string? storageBind = null)
     {
+        var binds = new List<string>();
+        if (!string.IsNullOrWhiteSpace(storageBind))
+        {
+            binds.Add(storageBind);
+        }
+
         return new CreateContainerParameters
         {
             Image = image,
@@ -738,9 +758,84 @@ public sealed class DockerService
                 {
                     "no-new-privileges:true"
                 },
-                Binds = new List<string>()
+                Binds = binds
             }
         };
+    }
+
+    private string? ResolveStorageDirectoryBind(string? storagePath, string? containerPath, bool readOnly)
+    {
+        if (storagePath is null)
+        {
+            return null;
+        }
+
+        var sourcePath = ResolveStorageDirectoryPath(storagePath);
+        var targetPath = ResolveContainerMountPath(containerPath);
+        return $"{sourcePath}:{targetPath}{(readOnly ? ":ro" : string.Empty)}";
+    }
+
+    private string ResolveStorageDirectoryPath(string storagePath)
+    {
+        var rootPath = Path.GetFullPath(_storage.RootPath);
+        var normalized = storagePath.Replace('\\', '/').Trim();
+        var storageRootRelativePath = GetStorageRelativePathFromComposeSource(normalized);
+        var relativePath = storageRootRelativePath is null
+            ? normalized.TrimStart('/')
+            : storageRootRelativePath.TrimStart('/');
+        var fullPath = string.IsNullOrWhiteSpace(normalized) || normalized == "/"
+            ? rootPath
+            : Path.GetFullPath(Path.Combine(rootPath, relativePath));
+
+        if (!IsPathInsideOrEqual(fullPath, rootPath))
+        {
+            throw new DockerToolException(
+                "PATH_OUTSIDE_STROGE",
+                "storagePath must stay inside the configured stroge directory.",
+                "Use a relative path inside stroge, or use empty string or / for the stroge root.",
+                new { storagePath = "string?" });
+        }
+
+        if (!Directory.Exists(fullPath))
+        {
+            throw new DockerToolException(
+                "STROGE_DIRECTORY_NOT_FOUND",
+                $"Stroge directory not found: {storagePath}.",
+                "Create the directory with the storage tools first, or use empty string or / for the stroge root.",
+                new { storagePath = "string?" });
+        }
+
+        return fullPath;
+    }
+
+    private static string ResolveContainerMountPath(string? containerPath)
+    {
+        var targetPath = string.IsNullOrWhiteSpace(containerPath) ? "/stroge" : containerPath.Trim();
+        if (!targetPath.StartsWith("/", StringComparison.Ordinal) ||
+            targetPath.Contains(":", StringComparison.Ordinal) ||
+            targetPath.Contains('\0'))
+        {
+            throw new DockerToolException(
+                "INVALID_CONTAINER_PATH",
+                "containerPath must be an absolute Linux container path.",
+                "Use a path such as /stroge or /work.",
+                new { containerPath = "string?" });
+        }
+
+        return targetPath;
+    }
+
+    private static bool IsPathInsideOrEqual(string path, string rootPath)
+    {
+        var comparison = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        var fullPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var fullRoot = Path.GetFullPath(rootPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        return string.Equals(fullPath, fullRoot, comparison) ||
+            fullPath.StartsWith(fullRoot + Path.DirectorySeparatorChar, comparison) ||
+            fullPath.StartsWith(fullRoot + Path.AltDirectorySeparatorChar, comparison);
     }
 
     private static List<ComposeServiceDefinition> ParseComposeServices(string yaml)
@@ -959,15 +1054,77 @@ public sealed class DockerService
         }
     }
 
-    private static void ApplyComposeVolumes(CreateContainerParameters parameters, IReadOnlyList<string> volumes)
+    private void ApplyComposeVolumes(CreateContainerParameters parameters, IReadOnlyList<string> volumes)
     {
         foreach (var volume in volumes)
         {
             if (!string.IsNullOrWhiteSpace(volume))
             {
-                parameters.HostConfig.Binds.Add(volume);
+                parameters.HostConfig.Binds.Add(NormalizeComposeStorageVolume(volume.Trim()));
             }
         }
+    }
+
+    private string NormalizeComposeStorageVolume(string volume)
+    {
+        var parts = volume.Split(':');
+        if (parts.Length < 2 || IsLikelyWindowsDrivePath(parts))
+        {
+            return volume;
+        }
+
+        var source = parts[0].Trim();
+        var storageRelativePath = GetStorageRelativePathFromComposeSource(source);
+        if (storageRelativePath is null)
+        {
+            return volume;
+        }
+
+        var storageSource = ResolveStorageDirectoryPath(storageRelativePath);
+        return $"{storageSource}:{string.Join(":", parts.Skip(1))}";
+    }
+
+    private string? GetStorageRelativePathFromComposeSource(string source)
+    {
+        var rootName = Path.GetFileName(_storage.RootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (string.IsNullOrWhiteSpace(rootName))
+        {
+            rootName = "stroge";
+        }
+
+        var normalized = source.Replace('\\', '/').Trim();
+        while (normalized.StartsWith("./", StringComparison.Ordinal))
+        {
+            normalized = normalized[2..];
+        }
+
+        var storageRoot = "/" + rootName;
+        if (string.Equals(normalized, rootName, StringComparison.Ordinal) ||
+            string.Equals(normalized, storageRoot, StringComparison.Ordinal))
+        {
+            return "/";
+        }
+
+        if (normalized.StartsWith(rootName + "/", StringComparison.Ordinal))
+        {
+            return normalized[rootName.Length..];
+        }
+
+        if (normalized.StartsWith(storageRoot + "/", StringComparison.Ordinal))
+        {
+            return normalized[storageRoot.Length..];
+        }
+
+        return null;
+    }
+
+    private static bool IsLikelyWindowsDrivePath(IReadOnlyList<string> volumeParts)
+    {
+        return volumeParts.Count >= 3 &&
+            volumeParts[0].Length == 1 &&
+            char.IsLetter(volumeParts[0][0]) &&
+            (volumeParts[1].StartsWith("\\", StringComparison.Ordinal) ||
+                volumeParts[1].StartsWith("/", StringComparison.Ordinal));
     }
 
     private static string GenerateComposeContainerName(string? projectName, string serviceName)

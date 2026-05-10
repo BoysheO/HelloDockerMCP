@@ -7,6 +7,7 @@ services:
       DOCKER_TLS_CERTDIR: ""
     volumes:
       - docker-dind-data:/var/lib/docker
+      - ./stroge:/stroge
     expose:
       - "2375"
     healthcheck:
@@ -30,7 +31,13 @@ services:
     volumes:
       - ./HelloDockerMcp:/src
       - ./stroge:/stroge
-    command: dotnet run --urls http://*:5000
+    command: sh -c "dotnet restore && dotnet run --no-restore --urls http://*:5000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
     depends_on:
       docker-dind:
         condition: service_healthy
@@ -51,7 +58,13 @@ services:
       OAuth__Accounts__0__Password: ${HELLO_DOCKER_OAUTH_PASSWORD:-password}
     volumes:
       - ./HelloDockerAuth:/src
-    command: dotnet run --urls http://*:5001
+    command: sh -c "dotnet restore && dotnet run --no-restore --urls http://*:5001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
     restart: always
 
   frpc:
@@ -60,8 +73,10 @@ services:
     volumes:
       - ./frpc.toml:/etc/frp/frpc.toml:ro
     depends_on:
-      - hello-docker-mcp
-      - hello-docker-auth
+      hello-docker-mcp:
+        condition: service_healthy
+      hello-docker-auth:
+        condition: service_healthy
     restart: always
 
 volumes:

@@ -17,6 +17,8 @@ public sealed class StorageService
         TryChmod777(_rootPath);
     }
 
+    public string RootPath => _rootPath;
+
     public object GetInfo()
     {
         var directory = new DirectoryInfo(_rootPath);

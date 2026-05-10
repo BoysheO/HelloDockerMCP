@@ -12,8 +12,11 @@ builder.Services.AddOptions<OAuthOptions>()
     .Validate(options => !string.IsNullOrWhiteSpace(options.Issuer), "OAuth:Issuer is required.")
     .ValidateOnStart();
 builder.Services.AddSingleton<AuthorizationCodeStore>();
+builder.Services.AddHealthChecks();
 
 var app = builder.Build();
+
+app.MapHealthChecks("/health");
 
 app.MapGet("/", () => Results.Redirect("/.well-known/oauth-authorization-server"));
 

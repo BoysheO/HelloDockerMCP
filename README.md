@@ -17,7 +17,7 @@ The compose stack starts:
 
 ## `stroge` workspace
 
-The host directory `./stroge` is mounted into the MCP container at `/stroge`.
+The host directory `./stroge` is mounted into both the MCP container and the Docker-in-Docker daemon container at `/stroge`.
 
 This directory is intended as a convenient file workspace for AI agents. The MCP storage tools can read, create, upload, move, copy, and delete files inside it. When a file operation fails because of insufficient permissions, the MCP service attempts to repair permissions with `chmod 777` and retries automatically.
 
@@ -40,3 +40,5 @@ In addition to creating a single container from an allowed image, the MCP servic
 - `volumes`
 
 Images are still checked against the server allow list in `HelloDockerMcp/appsettings.json`, and containers are created but not started.
+
+Compose volume entries can mount `/stroge` or a directory under `/stroge`, for example `/stroge:/work` or `/stroge/project:/work`.
