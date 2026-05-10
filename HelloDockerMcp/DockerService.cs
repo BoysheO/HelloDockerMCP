@@ -852,9 +852,9 @@ public sealed class DockerService
         {
             throw new DockerToolException(
                 "INVALID_COMPOSE_YAML",
-                "Compose yaml could not be parsed.",
+                $"Compose yaml could not be parsed: {ex.Message}",
                 "Fix the yaml syntax and retry.",
-                new { composeYaml = "string" }) from ex;
+                new { composeYaml = "string" });
         }
 
         if (stream.Documents.Count == 0 ||
