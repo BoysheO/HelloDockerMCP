@@ -1,0 +1,46 @@
+services:
+  docker-dind:
+    image: docker:27-dind
+    container_name: hello-docker-dind
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    volumes:
+      - docker-dind-data:/var/lib/docker
+    expose:
+      - "2375"
+    healthcheck:
+      test: ["CMD-SHELL", "docker info >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: always
+
+  hello-docker-mcp:
+    image: mcr.microsoft.com/dotnet/sdk:10.0
+    container_name: hello-docker-mcp
+    working_dir: /src
+    environment:
+      DOCKER_HOST: http://docker-dind:2375
+    volumes:
+      - ./HelloDockerMcp:/src
+    command: dotnet run --urls http://*:5000
+    ports:
+      - "5000:5000"
+    depends_on:
+      docker-dind:
+        condition: service_healthy
+    restart: always
+
+  # frpc:
+  #   image: ghcr.io/snowdreamtech/frpc:0.63.0
+  #   container_name: frpc4hello-docker-mcp
+  #   volumes:
+  #     - ./frpc.toml:/etc/frp/frpc.toml:ro
+  #   network_mode: "service:hello-docker-mcp"
+  #   depends_on:
+  #     - hello-docker-mcp
+  #   restart: always
+
+volumes:
+  docker-dind-data:

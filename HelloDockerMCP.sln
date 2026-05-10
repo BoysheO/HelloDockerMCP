@@ -1,0 +1,30 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "hello-world", "hello-world\hello-world.csproj", "{D50466AB-28F0-10B0-CE02-389B4A88C0EE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HelloDockerMcp", "HelloDockerMcp\HelloDockerMcp.csproj", "{BB95E14E-3148-6996-5392-074DD1153E03}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{D50466AB-28F0-10B0-CE02-389B4A88C0EE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D50466AB-28F0-10B0-CE02-389B4A88C0EE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D50466AB-28F0-10B0-CE02-389B4A88C0EE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D50466AB-28F0-10B0-CE02-389B4A88C0EE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BB95E14E-3148-6996-5392-074DD1153E03}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BB95E14E-3148-6996-5392-074DD1153E03}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BB95E14E-3148-6996-5392-074DD1153E03}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BB95E14E-3148-6996-5392-074DD1153E03}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {5492F809-A8EC-4A6C-AC9E-29B3EBACFDF0}
+	EndGlobalSection
+EndGlobal

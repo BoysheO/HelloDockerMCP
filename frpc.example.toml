@@ -1,0 +1,20 @@
+serverAddr = "<REPLACE_WITH_YOUR_SERVERIP>"
+serverPort = 7000
+
+[auth]
+method = "token"
+# Replace the token below with your real token in your local `frpc.toml` (DO NOT commit it)
+token = "<REPLACE_WITH_YOUR_TOKEN>"
+
+# [tls]
+# enable = true
+
+[transport]
+tcpMux = false
+
+[[proxies]]
+name = "hello_docker_mcp"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 5000
+remotePort = 7010

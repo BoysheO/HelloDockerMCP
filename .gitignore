@@ -1,0 +1,7 @@
+# Ignore frpc config that contains tokens
+frpc.toml
+
+# Ignore build outputs
+**/bin
+**/obj
+**/publish
