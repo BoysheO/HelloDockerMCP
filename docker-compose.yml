@@ -7,7 +7,7 @@ services:
       DOCKER_TLS_CERTDIR: ""
     volumes:
       - docker-dind-data:/var/lib/docker
-      - ./stroge:/stroge
+      - ./storage:/storage
     expose:
       - "2375"
     healthcheck:
@@ -27,10 +27,10 @@ services:
       OAuth__SigningKey: ${HELLO_DOCKER_OAUTH_SIGNING_KEY:-dev-only-change-me-at-least-32-bytes}
       OAuth__Scope: ${HELLO_DOCKER_OAUTH_SCOPE:-mcp}
       OAuth__ResourceName: ${HELLO_DOCKER_OAUTH_RESOURCE_NAME:-Hello Docker MCP}
-      Storage__RootPath: /stroge
+      Storage__RootPath: /storage
     volumes:
       - ./HelloDockerMcp:/src
-      - ./stroge:/stroge
+      - ./storage:/storage
     command: sh -c "dotnet restore && dotnet run --no-restore --urls http://*:5000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]

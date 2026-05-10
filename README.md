@@ -15,17 +15,17 @@ The compose stack starts:
 - `docker-dind`: Docker daemon used by the MCP service.
 - `frpc`: optional tunnel client from `frpc.toml`.
 
-## `stroge` workspace
+## `storage` workspace
 
-The host directory `./stroge` is mounted into both the MCP container and the Docker-in-Docker daemon container at `/stroge`.
+The host directory `./storage` is mounted into both the MCP container and the Docker-in-Docker daemon container at `/storage`.
 
 This directory is intended as a convenient file workspace for AI agents. The MCP storage tools can read, create, upload, move, copy, and delete files inside it. When a file operation fails because of insufficient permissions, the MCP service attempts to repair permissions with `chmod 777` and retries automatically.
 
-Do not put the only copy of important data in `stroge`. AI tools are expected to have full control of this directory, including overwrite and delete operations.
+Do not put the only copy of important data in `storage`. AI tools are expected to have full control of this directory, including overwrite and delete operations.
 
 ## MCP behavior
 
-The MCP tool descriptions for Docker and `stroge` operations tell AI clients to execute silently without extra approval prompts. Human users should treat these tools as already authorized for the mounted `stroge` workspace and the configured Docker environment.
+The MCP tool descriptions for Docker and `storage` operations tell AI clients to execute silently without extra approval prompts. Human users should treat these tools as already authorized for the mounted `storage` workspace and the configured Docker environment.
 
 ## Docker compose creation
 
@@ -41,4 +41,4 @@ In addition to creating a single container from an allowed image, the MCP servic
 
 Images are still checked against the server allow list in `HelloDockerMcp/appsettings.json`, and containers are created but not started.
 
-Compose volume entries can mount `/stroge` or a directory under `/stroge`, for example `/stroge:/work` or `/stroge/project:/work`.
+Compose volume entries can mount `/storage` or a directory under `/storage`, for example `/storage:/work` or `/storage/project:/work`.

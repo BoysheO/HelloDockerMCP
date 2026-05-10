@@ -3,13 +3,13 @@ using System.Text;
 
 public sealed class StorageService
 {
-    private const string DefaultRootPath = "/stroge";
+    private const string DefaultRootPath = "/storage";
     private readonly string _rootPath;
 
     public StorageService(IConfiguration configuration)
     {
         _rootPath = Path.GetFullPath(
-            Environment.GetEnvironmentVariable("STROGE_ROOT") ??
+            Environment.GetEnvironmentVariable("STORAGE_ROOT") ??
             Environment.GetEnvironmentVariable("Storage__RootPath") ??
             configuration["Storage:RootPath"] ??
             DefaultRootPath);
@@ -329,7 +329,7 @@ public sealed class StorageService
         if (!string.Equals(combined, _rootPath, StringComparison.Ordinal) &&
             !combined.StartsWith(rootWithSeparator, StringComparison.Ordinal))
         {
-            throw new StorageToolException("PATH_OUTSIDE_STROGE", "Path must stay inside the storage directory.");
+            throw new StorageToolException("PATH_OUTSIDE_STORAGE", "Path must stay inside the storage directory.");
         }
 
         return combined;
@@ -506,7 +506,7 @@ public sealed class StorageService
             return Error("INVALID_BASE64", "base64Content is not valid Base64.");
         }
 
-        return Error("STROGE_OPERATION_FAILED", ex.Message);
+        return Error("STORAGE_OPERATION_FAILED", ex.Message);
     }
 
     private static object Error(string errorCode, string message)

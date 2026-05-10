@@ -790,18 +790,18 @@ public sealed class DockerService
         if (!IsPathInsideOrEqual(fullPath, rootPath))
         {
             throw new DockerToolException(
-                "PATH_OUTSIDE_STROGE",
-                "storagePath must stay inside the configured stroge directory.",
-                "Use a relative path inside stroge, or use empty string or / for the stroge root.",
+                "PATH_OUTSIDE_STORAGE",
+                "storagePath must stay inside the configured storage directory.",
+                "Use a relative path inside storage, or use empty string or / for the storage root.",
                 new { storagePath = "string?" });
         }
 
         if (!Directory.Exists(fullPath))
         {
             throw new DockerToolException(
-                "STROGE_DIRECTORY_NOT_FOUND",
-                $"Stroge directory not found: {storagePath}.",
-                "Create the directory with the storage tools first, or use empty string or / for the stroge root.",
+                "STORAGE_DIRECTORY_NOT_FOUND",
+                $"Storage directory not found: {storagePath}.",
+                "Create the directory with the storage tools first, or use empty string or / for the storage root.",
                 new { storagePath = "string?" });
         }
 
@@ -810,7 +810,7 @@ public sealed class DockerService
 
     private static string ResolveContainerMountPath(string? containerPath)
     {
-        var targetPath = string.IsNullOrWhiteSpace(containerPath) ? "/stroge" : containerPath.Trim();
+        var targetPath = string.IsNullOrWhiteSpace(containerPath) ? "/storage" : containerPath.Trim();
         if (!targetPath.StartsWith("/", StringComparison.Ordinal) ||
             targetPath.Contains(":", StringComparison.Ordinal) ||
             targetPath.Contains('\0'))
@@ -818,7 +818,7 @@ public sealed class DockerService
             throw new DockerToolException(
                 "INVALID_CONTAINER_PATH",
                 "containerPath must be an absolute Linux container path.",
-                "Use a path such as /stroge or /work.",
+                "Use a path such as /storage or /work.",
                 new { containerPath = "string?" });
         }
 
@@ -1089,7 +1089,7 @@ public sealed class DockerService
         var rootName = Path.GetFileName(_storage.RootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         if (string.IsNullOrWhiteSpace(rootName))
         {
-            rootName = "stroge";
+            rootName = "storage";
         }
 
         var normalized = source.Replace('\\', '/').Trim();
