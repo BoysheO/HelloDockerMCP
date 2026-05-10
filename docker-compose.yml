@@ -22,25 +22,45 @@ services:
     working_dir: /src
     environment:
       DOCKER_HOST: http://docker-dind:2375
+      OAuth__Issuer: ${HELLO_DOCKER_OAUTH_ISSUER:-http://localhost:5001}
+      OAuth__SigningKey: ${HELLO_DOCKER_OAUTH_SIGNING_KEY:-dev-only-change-me-at-least-32-bytes}
+      OAuth__Scope: ${HELLO_DOCKER_OAUTH_SCOPE:-mcp}
+      OAuth__ResourceName: ${HELLO_DOCKER_OAUTH_RESOURCE_NAME:-Hello Docker MCP}
     volumes:
       - ./HelloDockerMcp:/src
     command: dotnet run --urls http://*:5000
-    ports:
-      - "5000:5000"
     depends_on:
       docker-dind:
         condition: service_healthy
+      hello-docker-auth:
+        condition: service_started
     restart: always
 
-  # frpc:
-  #   image: ghcr.io/snowdreamtech/frpc:0.63.0
-  #   container_name: frpc4hello-docker-mcp
-  #   volumes:
-  #     - ./frpc.toml:/etc/frp/frpc.toml:ro
-  #   network_mode: "service:hello-docker-mcp"
-  #   depends_on:
-  #     - hello-docker-mcp
-  #   restart: always
+  hello-docker-auth:
+    image: mcr.microsoft.com/dotnet/sdk:10.0
+    container_name: hello-docker-auth
+    working_dir: /src
+    environment:
+      OAuth__Issuer: ${HELLO_DOCKER_OAUTH_ISSUER:-http://localhost:5001}
+      OAuth__SigningKey: ${HELLO_DOCKER_OAUTH_SIGNING_KEY:-dev-only-change-me-at-least-32-bytes}
+      OAuth__AccessTokenLifetimeSeconds: ${HELLO_DOCKER_OAUTH_ACCESS_TOKEN_LIFETIME_SECONDS:-3600}
+      OAuth__AuthorizationCodeLifetimeSeconds: ${HELLO_DOCKER_OAUTH_AUTHORIZATION_CODE_LIFETIME_SECONDS:-300}
+      OAuth__Accounts__0__Username: ${HELLO_DOCKER_OAUTH_USERNAME:-admin}
+      OAuth__Accounts__0__Password: ${HELLO_DOCKER_OAUTH_PASSWORD:-password}
+    volumes:
+      - ./HelloDockerAuth:/src
+    command: dotnet run --urls http://*:5001
+    restart: always
+
+  frpc:
+    image: ghcr.io/snowdreamtech/frpc:0.63.0
+    container_name: frpc4hello-docker-mcp
+    volumes:
+      - ./frpc.toml:/etc/frp/frpc.toml:ro
+    depends_on:
+      - hello-docker-mcp
+      - hello-docker-auth
+    restart: always
 
 volumes:
   docker-dind-data:

@@ -1,5 +1,6 @@
 # Ignore frpc config that contains tokens
 frpc.toml
+run.bat
 
 # Ignore build outputs
 **/bin

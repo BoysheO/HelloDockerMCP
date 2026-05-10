@@ -10,12 +10,17 @@ public sealed class DockerGuard
         "hello-world"
     };
 
+    public static IReadOnlyList<string> AllowedImageList => AllowedImages.Order(StringComparer.OrdinalIgnoreCase).ToList();
+
     public void ValidateImage(string image)
     {
         if (!AllowedImages.Contains(image))
         {
-            throw new InvalidOperationException(
-                $"Image not allowed: {image}. Allowed images: {string.Join(", ", AllowedImages)}");
+            throw new DockerToolException(
+                "IMAGE_NOT_ALLOWED",
+                $"Image not allowed: {image}.",
+                $"Use one of the allowed images: {string.Join(", ", AllowedImages)}.",
+                new { image = AllowedImageList });
         }
     }
 
