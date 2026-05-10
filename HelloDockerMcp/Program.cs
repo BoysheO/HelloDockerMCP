@@ -37,6 +37,20 @@ builder.Services.AddOptions<McpOAuthOptions>()
     .Validate(options => !string.IsNullOrWhiteSpace(options.SigningKey), "OAuth:SigningKey is required.")
     .Validate(options => !string.IsNullOrWhiteSpace(options.Issuer), "OAuth:Issuer is required.")
     .ValidateOnStart();
+builder.Services.AddOptions<DockerOptions>()
+    .Bind(builder.Configuration.GetSection("Docker"))
+    .Validate(options => options.AllowedImages.Count > 0, "Docker:AllowedImages must contain at least one image.")
+    .Validate(
+        options => options.AllowedImages.All(image => !string.IsNullOrWhiteSpace(image)),
+        "Docker:AllowedImages cannot contain blank values.")
+    .Validate(
+        options => options.ResourceLimits.MinMemoryMb > 0 &&
+            options.ResourceLimits.MaxMemoryMb >= options.ResourceLimits.MinMemoryMb,
+        "Docker:ResourceLimits memory bounds are invalid.")
+    .Validate(
+        options => options.ResourceLimits.MaxCpus > 0,
+        "Docker:ResourceLimits:MaxCpus must be greater than 0.")
+    .ValidateOnStart();
 builder.Services
     .AddAuthentication(SignedBearerAuthenticationHandler.SchemeName)
     .AddScheme<AuthenticationSchemeOptions, SignedBearerAuthenticationHandler>(

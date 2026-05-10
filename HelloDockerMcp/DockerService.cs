@@ -2,6 +2,7 @@ using Docker.DotNet;
 using Docker.DotNet.Models;
 using System.Diagnostics;
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 
@@ -54,10 +55,27 @@ public sealed class DockerService
         }
     }
 
+    public object GetAvailableImages()
+    {
+        return _guard.GetAvailableImages();
+    }
+
+    public object GetEnvironmentArchitecture()
+    {
+        return new
+        {
+            ok = true,
+            architecture = NormalizeArchitecture(RuntimeInformation.OSArchitecture),
+            osArchitecture = RuntimeInformation.OSArchitecture.ToString(),
+            processArchitecture = RuntimeInformation.ProcessArchitecture.ToString(),
+            operatingSystem = RuntimeInformation.OSDescription
+        };
+    }
+
     public async Task<object> CreateContainerAsync(
         string? image,
         string? name,
-        JsonElement command,
+        JsonElement? command,
         long memoryMb,
         double cpus)
     {
@@ -94,7 +112,7 @@ public sealed class DockerService
     public async Task<object> RunContainerAsync(
         string? image,
         string? name,
-        JsonElement command,
+        JsonElement? command,
         long memoryMb,
         double cpus,
         int timeoutSeconds,
@@ -420,7 +438,7 @@ public sealed class DockerService
         var result = await RunContainerAsync(
             "hello-world:latest",
             name: null,
-            command: default,
+            command: null,
             memoryMb: 256,
             cpus: 0.5,
             timeoutSeconds: 30,
@@ -674,7 +692,7 @@ public sealed class DockerService
         }
     }
 
-    private static string ValidateImage(string? image)
+    private string ValidateImage(string? image)
     {
         if (string.IsNullOrWhiteSpace(image))
         {
@@ -682,10 +700,12 @@ public sealed class DockerService
                 "MISSING_REQUIRED_ARGUMENT",
                 "A Docker image is required.",
                 "Use {\"image\":\"hello-world:latest\"} or another allowed image.",
-                new { image = DockerGuard.AllowedImageList });
+                new { image = _guard.AllowedImageList });
         }
 
-        return image.Trim();
+        var normalized = image.Trim();
+        _guard.ValidateImage(normalized);
+        return normalized;
     }
 
     private static int ValidateTimeout(int timeoutSeconds, int minimum, int maximum)
@@ -701,25 +721,37 @@ public sealed class DockerService
         return timeoutSeconds;
     }
 
-    private static IList<string>? ParseCommand(JsonElement command)
+    private static string NormalizeArchitecture(Architecture architecture)
     {
-        if (command.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+        return architecture switch
+        {
+            Architecture.X86 or Architecture.X64 => "x86",
+            Architecture.Arm or Architecture.Arm64 => "arm",
+            _ => architecture.ToString().ToLowerInvariant()
+        };
+    }
+
+    private static IList<string>? ParseCommand(JsonElement? command)
+    {
+        if (command is null || command.Value.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
         {
             return null;
         }
 
-        if (command.ValueKind == JsonValueKind.String)
+        var commandValue = command.Value;
+
+        if (commandValue.ValueKind == JsonValueKind.String)
         {
-            var value = command.GetString();
+            var value = commandValue.GetString();
             return string.IsNullOrWhiteSpace(value)
                 ? null
                 : SplitCommandLine(value);
         }
 
-        if (command.ValueKind == JsonValueKind.Array)
+        if (commandValue.ValueKind == JsonValueKind.Array)
         {
             var args = new List<string>();
-            foreach (var item in command.EnumerateArray())
+            foreach (var item in commandValue.EnumerateArray())
             {
                 if (item.ValueKind != JsonValueKind.String)
                 {
