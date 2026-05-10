@@ -5,6 +5,8 @@ using System.Net;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using YamlDotNet.Core;
+using YamlDotNet.RepresentationModel;
 
 public sealed class DockerService
 {
@@ -841,148 +843,101 @@ public sealed class DockerService
     private static List<ComposeServiceDefinition> ParseComposeServices(string yaml)
     {
         var services = new List<ComposeServiceDefinition>();
-        ComposeServiceDefinition? current = null;
-        string? currentListField = null;
-        string? currentMapField = null;
-        var inServices = false;
-
-        foreach (var rawLine in yaml.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
+        var stream = new YamlStream();
+        try
         {
-            var lineWithoutComment = StripYamlComment(rawLine);
-            if (string.IsNullOrWhiteSpace(lineWithoutComment))
+            stream.Load(new StringReader(yaml));
+        }
+        catch (YamlException ex)
+        {
+            throw new DockerToolException(
+                "INVALID_COMPOSE_YAML",
+                "Compose yaml could not be parsed.",
+                "Fix the yaml syntax and retry.",
+                new { composeYaml = "string" }) from ex;
+        }
+
+        if (stream.Documents.Count == 0 ||
+            stream.Documents[0].RootNode is not YamlMappingNode root ||
+            TryGetMappingValue(root, "services") is not YamlMappingNode servicesNode)
+        {
+            return services;
+        }
+
+        foreach (var serviceEntry in servicesNode.Children)
+        {
+            var serviceName = ScalarValue(serviceEntry.Key);
+            if (string.IsNullOrWhiteSpace(serviceName) ||
+                serviceEntry.Value is not YamlMappingNode serviceNode)
             {
                 continue;
             }
 
-            var indent = lineWithoutComment.TakeWhile(char.IsWhiteSpace).Count();
-            var trimmed = lineWithoutComment.Trim();
+            var service = new ComposeServiceDefinition(serviceName);
+            services.Add(service);
 
-            if (indent == 0)
+            foreach (var fieldEntry in serviceNode.Children)
             {
-                inServices = string.Equals(trimmed.TrimEnd(':'), "services", StringComparison.OrdinalIgnoreCase);
-                current = null;
-                currentListField = null;
-                currentMapField = null;
-                continue;
-            }
-
-            if (!inServices)
-            {
-                continue;
-            }
-
-            if (indent == 2 && trimmed.EndsWith(':') && !trimmed.StartsWith('-'))
-            {
-                current = new ComposeServiceDefinition(Unquote(trimmed.TrimEnd(':').Trim()));
-                services.Add(current);
-                currentListField = null;
-                currentMapField = null;
-                continue;
-            }
-
-            if (current is null)
-            {
-                continue;
-            }
-
-            if (indent == 4 && trimmed.EndsWith(':'))
-            {
-                currentListField = trimmed.TrimEnd(':').Trim();
-                currentMapField = currentListField;
-                continue;
-            }
-
-            if (indent == 4)
-            {
-                var separator = trimmed.IndexOf(':');
-                if (separator < 0)
+                var fieldName = ScalarValue(fieldEntry.Key);
+                if (string.IsNullOrWhiteSpace(fieldName))
                 {
                     continue;
                 }
 
-                currentListField = null;
-                currentMapField = null;
-                var key = trimmed[..separator].Trim();
-                var value = Unquote(trimmed[(separator + 1)..].Trim());
-                ApplyComposeScalar(current, key, value);
-                continue;
-            }
-
-            if (indent >= 6 && trimmed.StartsWith('-') && currentListField is not null)
-            {
-                var value = Unquote(trimmed[1..].Trim());
-                ApplyComposeListItem(current, currentListField, value);
-                continue;
-            }
-
-            if (indent >= 6 && currentMapField is not null)
-            {
-                var separator = trimmed.IndexOf(':');
-                if (separator < 0)
-                {
-                    continue;
-                }
-
-                var key = Unquote(trimmed[..separator].Trim());
-                var value = Unquote(trimmed[(separator + 1)..].Trim());
-                if (string.Equals(currentMapField, "environment", StringComparison.OrdinalIgnoreCase))
-                {
-                    current.Environment[key] = value;
-                }
+                ApplyComposeYamlNode(service, fieldName, fieldEntry.Value);
             }
         }
 
         return services;
     }
 
-    private static void ApplyComposeScalar(ComposeServiceDefinition service, string key, string value)
+    private static void ApplyComposeYamlNode(ComposeServiceDefinition service, string key, YamlNode value)
     {
         switch (key)
         {
             case "image":
-                service.Image = value;
+                service.Image = ScalarValue(value);
                 break;
             case "container_name":
-                service.ContainerName = value;
+                service.ContainerName = ScalarValue(value);
                 break;
             case "working_dir":
-                service.WorkingDir = value;
+                service.WorkingDir = ScalarValue(value);
                 break;
             case "command":
                 service.Command = ParseComposeCommand(value);
                 break;
             case "environment":
-                foreach (var item in ParseInlineList(value))
-                {
-                    AddEnvironmentItem(service, item);
-                }
+                ApplyComposeEnvironment(service, value);
                 break;
             case "ports":
-                service.Ports.AddRange(ParseInlineList(value));
+                service.Ports.AddRange(ParseComposeStringList(value));
                 break;
             case "volumes":
-                service.Volumes.AddRange(ParseInlineList(value));
+                service.Volumes.AddRange(ParseComposeStringList(value));
                 break;
         }
     }
 
-    private static void ApplyComposeListItem(ComposeServiceDefinition service, string field, string value)
+    private static void ApplyComposeEnvironment(ComposeServiceDefinition service, YamlNode value)
     {
-        switch (field)
+        if (value is YamlMappingNode environmentMap)
         {
-            case "command":
-                service.Command ??= new List<string>();
-                service.Command.Add(value);
-                break;
-            case "environment":
-                AddEnvironmentItem(service, value);
-                break;
-            case "ports":
-                service.Ports.Add(value);
-                break;
-            case "volumes":
-                service.Volumes.Add(value);
-                break;
+            foreach (var item in environmentMap.Children)
+            {
+                var key = ScalarValue(item.Key);
+                if (!string.IsNullOrWhiteSpace(key))
+                {
+                    service.Environment[key] = ScalarValue(item.Value);
+                }
+            }
+
+            return;
+        }
+
+        foreach (var item in ParseComposeStringList(value))
+        {
+            AddEnvironmentItem(service, item);
         }
     }
 
@@ -995,30 +950,54 @@ public sealed class DockerService
         }
     }
 
-    private static IList<string>? ParseComposeCommand(string value)
+    private static IList<string>? ParseComposeCommand(YamlNode value)
     {
-        if (string.IsNullOrWhiteSpace(value))
+        if (value is YamlSequenceNode commandSequence)
         {
-            return null;
+            return commandSequence.Children
+                .Select(ScalarValue)
+                .Where(item => item.Length > 0)
+                .ToList();
         }
 
-        var inline = ParseInlineList(value);
-        return inline.Count > 0 ? inline : SplitCommandLine(value);
+        var command = ScalarValue(value);
+        return string.IsNullOrWhiteSpace(command) ? null : SplitCommandLine(command);
     }
 
-    private static List<string> ParseInlineList(string value)
+    private static List<string> ParseComposeStringList(YamlNode value)
     {
-        var trimmed = value.Trim();
-        if (!trimmed.StartsWith('[') || !trimmed.EndsWith(']'))
+        if (value is YamlSequenceNode sequence)
         {
-            return new List<string>();
+            return sequence.Children
+                .Select(ScalarValue)
+                .Where(item => item.Length > 0)
+                .ToList();
         }
 
-        return trimmed[1..^1]
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(Unquote)
-            .Where(item => item.Length > 0)
-            .ToList();
+        var scalar = ScalarValue(value);
+        return string.IsNullOrWhiteSpace(scalar) ? new List<string>() : new List<string> { scalar };
+    }
+
+    private static YamlNode? TryGetMappingValue(YamlMappingNode mapping, string key)
+    {
+        foreach (var item in mapping.Children)
+        {
+            if (string.Equals(ScalarValue(item.Key), key, StringComparison.OrdinalIgnoreCase))
+            {
+                return item.Value;
+            }
+        }
+
+        return null;
+    }
+
+    private static string ScalarValue(YamlNode node)
+    {
+        return node switch
+        {
+            YamlScalarNode scalar => scalar.Value ?? string.Empty,
+            _ => string.Empty
+        };
     }
 
     private static void ApplyComposePorts(CreateContainerParameters parameters, IReadOnlyList<string> ports)
@@ -1135,36 +1114,6 @@ public sealed class DockerService
             .ToArray())
             .Trim('-');
         return safe[..Math.Min(48, safe.Length)];
-    }
-
-    private static string StripYamlComment(string line)
-    {
-        var quote = false;
-        for (var i = 0; i < line.Length; i++)
-        {
-            if (line[i] is '\'' or '"')
-            {
-                quote = !quote;
-            }
-            else if (!quote && line[i] == '#')
-            {
-                return line[..i];
-            }
-        }
-
-        return line;
-    }
-
-    private static string Unquote(string value)
-    {
-        var trimmed = value.Trim();
-        if (trimmed.Length >= 2 &&
-            ((trimmed[0] == '"' && trimmed[^1] == '"') || (trimmed[0] == '\'' && trimmed[^1] == '\'')))
-        {
-            return trimmed[1..^1];
-        }
-
-        return trimmed;
     }
 
     private async Task PullImageAsync(string image)
