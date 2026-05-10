@@ -65,6 +65,7 @@ builder.Services.AddAuthorization(options =>
 
 builder.Services.AddSingleton<DockerGuard>();
 builder.Services.AddSingleton<DockerService>();
+builder.Services.AddSingleton<StorageService>();
 
 builder.Services
     .AddMcpServer()

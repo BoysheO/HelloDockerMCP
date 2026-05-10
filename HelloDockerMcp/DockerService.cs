@@ -109,6 +109,99 @@ public sealed class DockerService
         }
     }
 
+    public async Task<object> CreateContainersFromComposeYamlAsync(
+        string? composeYaml,
+        string? projectName,
+        string? serviceName,
+        long memoryMb,
+        double cpus)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(composeYaml))
+            {
+                return Error(
+                    "MISSING_REQUIRED_ARGUMENT",
+                    "composeYaml is required.",
+                    "Pass Docker Compose yaml text with a services section.",
+                    acceptedArgs: new { composeYaml = "string", projectName = "string", serviceName = "string?" });
+            }
+
+            _guard.ValidateResourceLimits(memoryMb, cpus);
+            var services = ParseComposeServices(composeYaml);
+            if (!string.IsNullOrWhiteSpace(serviceName))
+            {
+                services = services
+                    .Where(service => string.Equals(service.Name, serviceName.Trim(), StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+            }
+
+            if (services.Count == 0)
+            {
+                return Error(
+                    "COMPOSE_SERVICE_NOT_FOUND",
+                    "No matching compose services were found.",
+                    "Verify the services section and serviceName argument.");
+            }
+
+            var created = new List<object>();
+            foreach (var service in services)
+            {
+                if (string.IsNullOrWhiteSpace(service.Image))
+                {
+                    throw new DockerToolException(
+                        "COMPOSE_SERVICE_MISSING_IMAGE",
+                        $"Compose service '{service.Name}' does not define image.",
+                        "Add an image field to each service you want this API to create.");
+                }
+
+                var normalizedImage = ValidateImage(service.Image);
+                await PullImageAsync(normalizedImage);
+
+                var containerName = string.IsNullOrWhiteSpace(service.ContainerName)
+                    ? GenerateComposeContainerName(projectName, service.Name)
+                    : service.ContainerName.Trim();
+                var parameters = CreateParameters(
+                    normalizedImage,
+                    containerName,
+                    service.Command,
+                    memoryMb,
+                    cpus,
+                    autoRemove: false);
+
+                parameters.WorkingDir = service.WorkingDir;
+                parameters.Env = service.Environment.Count == 0
+                    ? null
+                    : service.Environment.Select(pair => $"{pair.Key}={pair.Value}").ToList();
+                ApplyComposePorts(parameters, service.Ports);
+                ApplyComposeVolumes(parameters, service.Volumes);
+
+                var result = await _client.Containers.CreateContainerAsync(parameters);
+                created.Add(new
+                {
+                    id = ShortId(result.ID),
+                    name = containerName,
+                    service = service.Name,
+                    image = normalizedImage,
+                    command = service.Command,
+                    created = true
+                });
+            }
+
+            return new
+            {
+                ok = true,
+                created,
+                count = created.Count,
+                note = "Created from compose yaml. Containers were not started."
+            };
+        }
+        catch (Exception ex)
+        {
+            return ToErrorResult(ex);
+        }
+    }
+
     public async Task<object> RunContainerAsync(
         string? image,
         string? name,
@@ -547,6 +640,76 @@ public sealed class DockerService
         }
     }
 
+    public async Task<object> CleanupContainersAsync()
+    {
+        try
+        {
+            var containers = await _client.Containers.ListContainersAsync(
+                new ContainersListParameters
+                {
+                    All = true
+                });
+
+            var stopped = new List<object>();
+            var removed = new List<object>();
+            var warnings = new List<object>();
+
+            foreach (var container in containers)
+            {
+                var displayName = FirstName(container);
+                var wasRunning = string.Equals(container.State, "running", StringComparison.OrdinalIgnoreCase);
+
+                try
+                {
+                    if (wasRunning)
+                    {
+                        await _client.Containers.StopContainerAsync(
+                            container.ID,
+                            new ContainerStopParameters
+                            {
+                                WaitBeforeKillSeconds = 10
+                            });
+                        stopped.Add(new { id = ShortId(container.ID), name = displayName });
+                    }
+
+                    await _client.Containers.RemoveContainerAsync(
+                        container.ID,
+                        new ContainerRemoveParameters
+                        {
+                            Force = false,
+                            RemoveVolumes = false
+                        });
+                    removed.Add(new { id = ShortId(container.ID), name = displayName, wasRunning });
+                }
+                catch (Exception ex)
+                {
+                    warnings.Add(new
+                    {
+                        code = wasRunning ? "CLEANUP_STOP_OR_REMOVE_FAILED" : "CLEANUP_REMOVE_FAILED",
+                        id = ShortId(container.ID),
+                        name = displayName,
+                        wasRunning,
+                        message = ex.Message
+                    });
+                }
+            }
+
+            return new
+            {
+                ok = warnings.Count == 0,
+                stopped,
+                stoppedCount = stopped.Count,
+                removed,
+                count = removed.Count,
+                warnings
+            };
+        }
+        catch (Exception ex)
+        {
+            return ToErrorResult(ex);
+        }
+    }
+
     private CreateContainerParameters CreateParameters(
         string image,
         string name,
@@ -578,6 +741,273 @@ public sealed class DockerService
                 Binds = new List<string>()
             }
         };
+    }
+
+    private static List<ComposeServiceDefinition> ParseComposeServices(string yaml)
+    {
+        var services = new List<ComposeServiceDefinition>();
+        ComposeServiceDefinition? current = null;
+        string? currentListField = null;
+        string? currentMapField = null;
+        var inServices = false;
+
+        foreach (var rawLine in yaml.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
+        {
+            var lineWithoutComment = StripYamlComment(rawLine);
+            if (string.IsNullOrWhiteSpace(lineWithoutComment))
+            {
+                continue;
+            }
+
+            var indent = lineWithoutComment.TakeWhile(char.IsWhiteSpace).Count();
+            var trimmed = lineWithoutComment.Trim();
+
+            if (indent == 0)
+            {
+                inServices = string.Equals(trimmed.TrimEnd(':'), "services", StringComparison.OrdinalIgnoreCase);
+                current = null;
+                currentListField = null;
+                currentMapField = null;
+                continue;
+            }
+
+            if (!inServices)
+            {
+                continue;
+            }
+
+            if (indent == 2 && trimmed.EndsWith(':') && !trimmed.StartsWith('-'))
+            {
+                current = new ComposeServiceDefinition(Unquote(trimmed.TrimEnd(':').Trim()));
+                services.Add(current);
+                currentListField = null;
+                currentMapField = null;
+                continue;
+            }
+
+            if (current is null)
+            {
+                continue;
+            }
+
+            if (indent == 4 && trimmed.EndsWith(':'))
+            {
+                currentListField = trimmed.TrimEnd(':').Trim();
+                currentMapField = currentListField;
+                continue;
+            }
+
+            if (indent == 4)
+            {
+                var separator = trimmed.IndexOf(':');
+                if (separator < 0)
+                {
+                    continue;
+                }
+
+                currentListField = null;
+                currentMapField = null;
+                var key = trimmed[..separator].Trim();
+                var value = Unquote(trimmed[(separator + 1)..].Trim());
+                ApplyComposeScalar(current, key, value);
+                continue;
+            }
+
+            if (indent >= 6 && trimmed.StartsWith('-') && currentListField is not null)
+            {
+                var value = Unquote(trimmed[1..].Trim());
+                ApplyComposeListItem(current, currentListField, value);
+                continue;
+            }
+
+            if (indent >= 6 && currentMapField is not null)
+            {
+                var separator = trimmed.IndexOf(':');
+                if (separator < 0)
+                {
+                    continue;
+                }
+
+                var key = Unquote(trimmed[..separator].Trim());
+                var value = Unquote(trimmed[(separator + 1)..].Trim());
+                if (string.Equals(currentMapField, "environment", StringComparison.OrdinalIgnoreCase))
+                {
+                    current.Environment[key] = value;
+                }
+            }
+        }
+
+        return services;
+    }
+
+    private static void ApplyComposeScalar(ComposeServiceDefinition service, string key, string value)
+    {
+        switch (key)
+        {
+            case "image":
+                service.Image = value;
+                break;
+            case "container_name":
+                service.ContainerName = value;
+                break;
+            case "working_dir":
+                service.WorkingDir = value;
+                break;
+            case "command":
+                service.Command = ParseComposeCommand(value);
+                break;
+            case "environment":
+                foreach (var item in ParseInlineList(value))
+                {
+                    AddEnvironmentItem(service, item);
+                }
+                break;
+            case "ports":
+                service.Ports.AddRange(ParseInlineList(value));
+                break;
+            case "volumes":
+                service.Volumes.AddRange(ParseInlineList(value));
+                break;
+        }
+    }
+
+    private static void ApplyComposeListItem(ComposeServiceDefinition service, string field, string value)
+    {
+        switch (field)
+        {
+            case "command":
+                service.Command ??= new List<string>();
+                service.Command.Add(value);
+                break;
+            case "environment":
+                AddEnvironmentItem(service, value);
+                break;
+            case "ports":
+                service.Ports.Add(value);
+                break;
+            case "volumes":
+                service.Volumes.Add(value);
+                break;
+        }
+    }
+
+    private static void AddEnvironmentItem(ComposeServiceDefinition service, string item)
+    {
+        var separator = item.IndexOf('=');
+        if (separator > 0)
+        {
+            service.Environment[item[..separator]] = item[(separator + 1)..];
+        }
+    }
+
+    private static IList<string>? ParseComposeCommand(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var inline = ParseInlineList(value);
+        return inline.Count > 0 ? inline : SplitCommandLine(value);
+    }
+
+    private static List<string> ParseInlineList(string value)
+    {
+        var trimmed = value.Trim();
+        if (!trimmed.StartsWith('[') || !trimmed.EndsWith(']'))
+        {
+            return new List<string>();
+        }
+
+        return trimmed[1..^1]
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(Unquote)
+            .Where(item => item.Length > 0)
+            .ToList();
+    }
+
+    private static void ApplyComposePorts(CreateContainerParameters parameters, IReadOnlyList<string> ports)
+    {
+        if (ports.Count == 0)
+        {
+            return;
+        }
+
+        parameters.ExposedPorts = new Dictionary<string, EmptyStruct>();
+        parameters.HostConfig.PortBindings = new Dictionary<string, IList<PortBinding>>();
+        foreach (var port in ports)
+        {
+            var parts = port.Split(':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var hostPort = parts.Length == 1 ? null : parts[^2];
+            var containerPort = parts[^1];
+            if (!containerPort.Contains('/'))
+            {
+                containerPort += "/tcp";
+            }
+
+            parameters.ExposedPorts[containerPort] = default;
+            if (!string.IsNullOrWhiteSpace(hostPort))
+            {
+                parameters.HostConfig.PortBindings[containerPort] = new List<PortBinding>
+                {
+                    new()
+                    {
+                        HostPort = hostPort
+                    }
+                };
+            }
+        }
+    }
+
+    private static void ApplyComposeVolumes(CreateContainerParameters parameters, IReadOnlyList<string> volumes)
+    {
+        foreach (var volume in volumes)
+        {
+            if (!string.IsNullOrWhiteSpace(volume))
+            {
+                parameters.HostConfig.Binds.Add(volume);
+            }
+        }
+    }
+
+    private static string GenerateComposeContainerName(string? projectName, string serviceName)
+    {
+        var project = string.IsNullOrWhiteSpace(projectName) ? "mcp" : projectName.Trim();
+        var safe = new string($"{project}-{serviceName}-{Guid.NewGuid():N}"
+            .Select(ch => char.IsLetterOrDigit(ch) ? char.ToLowerInvariant(ch) : '-')
+            .ToArray())
+            .Trim('-');
+        return safe[..Math.Min(48, safe.Length)];
+    }
+
+    private static string StripYamlComment(string line)
+    {
+        var quote = false;
+        for (var i = 0; i < line.Length; i++)
+        {
+            if (line[i] is '\'' or '"')
+            {
+                quote = !quote;
+            }
+            else if (!quote && line[i] == '#')
+            {
+                return line[..i];
+            }
+        }
+
+        return line;
+    }
+
+    private static string Unquote(string value)
+    {
+        var trimmed = value.Trim();
+        if (trimmed.Length >= 2 &&
+            ((trimmed[0] == '"' && trimmed[^1] == '"') || (trimmed[0] == '\'' && trimmed[^1] == '\'')))
+        {
+            return trimmed[1..^1];
+        }
+
+        return trimmed;
     }
 
     private async Task PullImageAsync(string image)
@@ -996,4 +1426,28 @@ public sealed class DockerToolException : Exception
     public string Hint { get; }
 
     public object? AcceptedArgs { get; }
+}
+
+internal sealed class ComposeServiceDefinition
+{
+    public ComposeServiceDefinition(string name)
+    {
+        Name = name;
+    }
+
+    public string Name { get; }
+
+    public string? Image { get; set; }
+
+    public string? ContainerName { get; set; }
+
+    public IList<string>? Command { get; set; }
+
+    public string? WorkingDir { get; set; }
+
+    public Dictionary<string, string> Environment { get; } = new(StringComparer.Ordinal);
+
+    public List<string> Ports { get; } = new();
+
+    public List<string> Volumes { get; } = new();
 }

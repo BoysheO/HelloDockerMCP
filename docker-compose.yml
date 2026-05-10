@@ -26,8 +26,10 @@ services:
       OAuth__SigningKey: ${HELLO_DOCKER_OAUTH_SIGNING_KEY:-dev-only-change-me-at-least-32-bytes}
       OAuth__Scope: ${HELLO_DOCKER_OAUTH_SCOPE:-mcp}
       OAuth__ResourceName: ${HELLO_DOCKER_OAUTH_RESOURCE_NAME:-Hello Docker MCP}
+      Storage__RootPath: /stroge
     volumes:
       - ./HelloDockerMcp:/src
+      - ./stroge:/stroge
     command: dotnet run --urls http://*:5000
     depends_on:
       docker-dind:
