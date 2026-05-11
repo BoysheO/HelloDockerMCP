@@ -19,6 +19,6 @@ rem Demo username/password used by the authorization server login page.
 set HELLO_DOCKER_OAUTH_USERNAME=admin
 set HELLO_DOCKER_OAUTH_PASSWORD=password
 
-docker compose up -d
+docker compose up -d --force-recreate
 
 endlocal

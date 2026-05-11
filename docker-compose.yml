@@ -27,7 +27,7 @@ services:
       OAuth__SigningKey: ${HELLO_DOCKER_OAUTH_SIGNING_KEY:-dev-only-change-me-at-least-32-bytes}
       OAuth__Scope: ${HELLO_DOCKER_OAUTH_SCOPE:-mcp}
       OAuth__ResourceName: ${HELLO_DOCKER_OAUTH_RESOURCE_NAME:-Hello Docker MCP}
-      Storage__RootPath: /storage
+      # Storage__RootPath: /storage
     volumes:
       - ./HelloDockerMcp:/src
       - ./storage:/storage

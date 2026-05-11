@@ -2,7 +2,10 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Threading.RateLimiting;
 using Microsoft.Extensions.Options;
+
+const string OAuthRateLimitPolicy = "OAuth";
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,10 +14,35 @@ builder.Services.AddOptions<OAuthOptions>()
     .Validate(options => !string.IsNullOrWhiteSpace(options.SigningKey), "OAuth:SigningKey is required.")
     .Validate(options => !string.IsNullOrWhiteSpace(options.Issuer), "OAuth:Issuer is required.")
     .ValidateOnStart();
+builder.Services.AddOptions<AuthRateLimitOptions>()
+    .Bind(builder.Configuration.GetSection("RateLimit"))
+    .Validate(options => options.PermitLimit > 0, "RateLimit:PermitLimit must be greater than zero.")
+    .Validate(options => options.WindowSeconds > 0, "RateLimit:WindowSeconds must be greater than zero.")
+    .Validate(options => options.QueueLimit >= 0, "RateLimit:QueueLimit must be zero or greater.")
+    .ValidateOnStart();
 builder.Services.AddSingleton<AuthorizationCodeStore>();
+builder.Services.AddSingleton<RefreshTokenStore>();
 builder.Services.AddHealthChecks();
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy(OAuthRateLimitPolicy, context =>
+    {
+        var rateLimitOptions = context.RequestServices.GetRequiredService<IOptions<AuthRateLimitOptions>>().Value;
+        return RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context), _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = rateLimitOptions.PermitLimit,
+            Window = TimeSpan.FromSeconds(rateLimitOptions.WindowSeconds),
+            QueueLimit = rateLimitOptions.QueueLimit,
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            AutoReplenishment = true
+        });
+    });
+});
 
 var app = builder.Build();
+
+app.UseRateLimiter();
 
 app.MapHealthChecks("/health");
 
@@ -32,12 +60,12 @@ app.MapGet("/.well-known/oauth-authorization-server", (
         token_endpoint = $"{issuer}/token",
         registration_endpoint = $"{issuer}/register",
         response_types_supported = new[] { "code" },
-        grant_types_supported = new[] { "authorization_code" },
+        grant_types_supported = new[] { "authorization_code", "refresh_token" },
         token_endpoint_auth_methods_supported = new[] { "none" },
         code_challenge_methods_supported = new[] { "S256", "plain" },
         scopes_supported = new[] { "mcp" }
     });
-});
+}).RequireRateLimiting(OAuthRateLimitPolicy);
 
 app.MapGet("/authorize", (HttpRequest request) =>
 {
@@ -58,7 +86,7 @@ app.MapGet("/authorize", (HttpRequest request) =>
     }
 
     return Results.Content(BuildLoginPage(parameters), "text/html", Encoding.UTF8);
-});
+}).RequireRateLimiting(OAuthRateLimitPolicy);
 
 app.MapPost("/authorize", async (
     HttpRequest request,
@@ -99,21 +127,34 @@ app.MapPost("/authorize", async (
     };
 
     return Results.Redirect(AppendQuery(redirect, query));
-});
+}).RequireRateLimiting(OAuthRateLimitPolicy);
 
 app.MapPost("/token", async (
     HttpRequest request,
     AuthorizationCodeStore codes,
+    RefreshTokenStore refreshTokens,
     IOptions<OAuthOptions> options) =>
 {
     var form = await request.ReadFormAsync();
-    if (!string.Equals(form["grant_type"].ToString(), "authorization_code", StringComparison.Ordinal))
+
+    return form["grant_type"].ToString() switch
     {
-        return Results.BadRequest(new { error = "unsupported_grant_type" });
-    }
+        "authorization_code" => RedeemAuthorizationCode(form, codes, refreshTokens, options.Value),
+        "refresh_token" => RedeemRefreshToken(form, refreshTokens, options.Value),
+        _ => Results.BadRequest(new { error = "unsupported_grant_type" })
+    };
+}).RequireRateLimiting(OAuthRateLimitPolicy);
+
+static IResult RedeemAuthorizationCode(
+    IFormCollection form,
+    AuthorizationCodeStore codes,
+    RefreshTokenStore refreshTokens,
+    OAuthOptions options)
+{
+    var now = DateTimeOffset.UtcNow;
 
     if (!codes.TryRedeem(form["code"].ToString(), out var code) ||
-        code.ExpiresAt <= DateTimeOffset.UtcNow ||
+        code.ExpiresAt <= now ||
         !string.Equals(code.ClientId, form["client_id"].ToString(), StringComparison.Ordinal) ||
         !string.Equals(code.RedirectUri, form["redirect_uri"].ToString(), StringComparison.Ordinal))
     {
@@ -125,23 +166,67 @@ app.MapPost("/token", async (
         return Results.BadRequest(new { error = "invalid_grant", error_description = "Invalid PKCE code verifier." });
     }
 
-    var expiresIn = options.Value.AccessTokenLifetimeSeconds;
-    var accessToken = JwtAccessToken.Create(
-        options.Value.Issuer,
-        options.Value.SigningKey,
-        code.Subject,
-        code.Scope,
-        code.Resource,
-        DateTimeOffset.UtcNow.AddSeconds(expiresIn));
+    var refreshToken = refreshTokens.Create(new RefreshToken(
+        ClientId: code.ClientId,
+        Scope: code.Scope,
+        Resource: code.Resource,
+        Subject: code.Subject,
+        ExpiresAt: now.AddSeconds(options.RefreshTokenLifetimeSeconds)));
 
-    return Results.Json(new
+    return IssueTokenResponse(options, code.Subject, code.Scope, code.Resource, refreshToken, now);
+}
+
+static IResult RedeemRefreshToken(
+    IFormCollection form,
+    RefreshTokenStore refreshTokens,
+    OAuthOptions options)
+{
+    var now = DateTimeOffset.UtcNow;
+    var refreshTokenValue = form["refresh_token"].ToString();
+    if (string.IsNullOrWhiteSpace(refreshTokenValue) ||
+        !refreshTokens.TryGet(refreshTokenValue, out var token))
     {
-        access_token = accessToken,
-        token_type = "Bearer",
-        expires_in = expiresIn,
-        scope = code.Scope
+        return Results.BadRequest(new { error = "invalid_grant" });
+    }
+
+    if (token.ExpiresAt <= now)
+    {
+        refreshTokens.Revoke(refreshTokenValue);
+        return Results.BadRequest(new { error = "invalid_grant" });
+    }
+
+    if (!string.Equals(token.ClientId, form["client_id"].ToString(), StringComparison.Ordinal))
+    {
+        return Results.BadRequest(new { error = "invalid_grant" });
+    }
+
+    var requestedScope = EmptyToNull(form["scope"].ToString());
+    var scope = requestedScope ?? token.Scope;
+    if (!IsScopeSubset(scope, token.Scope))
+    {
+        return Results.BadRequest(new { error = "invalid_scope" });
+    }
+
+    var requestedResource = EmptyToNull(form["resource"].ToString());
+    if (requestedResource is not null &&
+        !string.Equals(requestedResource, token.Resource, StringComparison.Ordinal))
+    {
+        return Results.BadRequest(new { error = "invalid_target" });
+    }
+
+    if (!refreshTokens.TryRedeem(refreshTokenValue, token))
+    {
+        return Results.BadRequest(new { error = "invalid_grant" });
+    }
+
+    var rotatedRefreshToken = refreshTokens.Create(token with
+    {
+        Scope = scope,
+        ExpiresAt = now.AddSeconds(options.RefreshTokenLifetimeSeconds)
     });
-});
+
+    return IssueTokenResponse(options, token.Subject, scope, token.Resource, rotatedRefreshToken, now);
+}
 
 app.MapPost("/register", async (HttpRequest request) =>
 {
@@ -156,13 +241,18 @@ app.MapPost("/register", async (HttpRequest request) =>
         client_id = $"client-{RandomNumberGenerator.GetHexString(16).ToLowerInvariant()}",
         client_id_issued_at = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
         redirect_uris = redirectUris,
-        grant_types = new[] { "authorization_code" },
+        grant_types = new[] { "authorization_code", "refresh_token" },
         response_types = new[] { "code" },
         token_endpoint_auth_method = "none"
     }, statusCode: StatusCodes.Status201Created);
-});
+}).RequireRateLimiting(OAuthRateLimitPolicy);
 
 app.Run();
+
+static string GetRateLimitPartitionKey(HttpContext context)
+{
+    return context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+}
 
 static string BuildLoginPage(IReadOnlyDictionary<string, string> parameters, string? error = null)
 {
@@ -272,6 +362,42 @@ static bool ValidateCodeVerifier(AuthorizationCode code, string codeVerifier)
         Encoding.ASCII.GetBytes(code.CodeChallenge));
 }
 
+static bool IsScopeSubset(string requestedScope, string originalScope)
+{
+    var originalScopes = originalScope.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.Ordinal);
+    return requestedScope
+        .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+        .All(originalScopes.Contains);
+}
+
+static IResult IssueTokenResponse(
+    OAuthOptions options,
+    string subject,
+    string scope,
+    string? resource,
+    string refreshToken,
+    DateTimeOffset now)
+{
+    var expiresIn = options.AccessTokenLifetimeSeconds;
+    var accessToken = JwtAccessToken.Create(
+        options.Issuer,
+        options.SigningKey,
+        subject,
+        scope,
+        resource,
+        now.AddSeconds(expiresIn),
+        now);
+
+    return Results.Json(new
+    {
+        access_token = accessToken,
+        token_type = "Bearer",
+        expires_in = expiresIn,
+        refresh_token = refreshToken,
+        scope
+    });
+}
+
 static string Base64UrlEncode(byte[] value)
 {
     return Convert.ToBase64String(value).TrimEnd('=').Replace('+', '-').Replace('/', '_');
@@ -287,6 +413,8 @@ public sealed class OAuthOptions
 
     public int AuthorizationCodeLifetimeSeconds { get; set; } = 300;
 
+    public int RefreshTokenLifetimeSeconds { get; set; } = 2592000;
+
     public List<AccountOptions> Accounts { get; set; } = new();
 }
 
@@ -297,11 +425,27 @@ public sealed class AccountOptions
     public string Password { get; set; } = string.Empty;
 }
 
+public sealed class AuthRateLimitOptions
+{
+    public int PermitLimit { get; set; } = 60;
+
+    public int WindowSeconds { get; set; } = 60;
+
+    public int QueueLimit { get; set; }
+}
+
 public sealed record AuthorizationCode(
     string ClientId,
     string RedirectUri,
     string? CodeChallenge,
     string CodeChallengeMethod,
+    string Scope,
+    string? Resource,
+    string Subject,
+    DateTimeOffset ExpiresAt);
+
+public sealed record RefreshToken(
+    string ClientId,
     string Scope,
     string? Resource,
     string Subject,
@@ -324,6 +468,33 @@ public sealed class AuthorizationCodeStore
     }
 }
 
+public sealed class RefreshTokenStore
+{
+    private readonly ConcurrentDictionary<string, RefreshToken> _tokens = new(StringComparer.Ordinal);
+
+    public string Create(RefreshToken token)
+    {
+        var value = RandomNumberGenerator.GetHexString(32).ToLowerInvariant();
+        _tokens[value] = token;
+        return value;
+    }
+
+    public bool TryGet(string refreshToken, out RefreshToken token)
+    {
+        return _tokens.TryGetValue(refreshToken, out token!);
+    }
+
+    public bool TryRedeem(string refreshToken, RefreshToken token)
+    {
+        return ((ICollection<KeyValuePair<string, RefreshToken>>)_tokens).Remove(new KeyValuePair<string, RefreshToken>(refreshToken, token));
+    }
+
+    public void Revoke(string refreshToken)
+    {
+        _tokens.TryRemove(refreshToken, out _);
+    }
+}
+
 public static class JwtAccessToken
 {
     public static string Create(
@@ -332,7 +503,8 @@ public static class JwtAccessToken
         string subject,
         string scope,
         string? audience,
-        DateTimeOffset expiresAt)
+        DateTimeOffset expiresAt,
+        DateTimeOffset issuedAt)
     {
         var header = JsonSerializer.SerializeToUtf8Bytes(new
         {
@@ -346,7 +518,7 @@ public static class JwtAccessToken
             scope,
             aud = audience,
             exp = expiresAt.ToUnixTimeSeconds(),
-            iat = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+            iat = issuedAt.ToUnixTimeSeconds()
         });
         var headerSegment = Base64UrlEncode(header);
         var payloadSegment = Base64UrlEncode(payload);

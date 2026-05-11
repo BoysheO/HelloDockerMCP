@@ -6,3 +6,8 @@ run.bat
 **/bin
 **/obj
 **/publish
+
+# Ignore storage contents except test.txt
+storage/*
+!storage/test.txt
+!storage/.gitkeep
