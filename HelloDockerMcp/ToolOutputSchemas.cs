@@ -199,6 +199,37 @@ public sealed class DockerInspectContainerResult : ToolResult
     public object? AcceptedArgs { get; set; }
 }
 
+public sealed class DockerShellStartResult : ToolResult
+{
+    public string? SessionId { get; set; }
+    public string? Container { get; set; }
+    public string? Shell { get; set; }
+    public string? Status { get; set; }
+    public int? IdleTimeoutSeconds { get; set; }
+    public DateTimeOffset? ExpiresAt { get; set; }
+    public object? Error { get; set; }
+}
+
+public sealed class DockerShellWriteResult : ToolResult
+{
+    public object? Error { get; set; }
+}
+
+public sealed class DockerShellReadResult : ToolResult
+{
+    public string? Stdout { get; set; }
+    public string? Stderr { get; set; }
+    public string? Status { get; set; }
+    public long? ExitCode { get; set; }
+    public object? Error { get; set; }
+}
+
+public sealed class DockerShellActionResult : ToolResult
+{
+    public string? Status { get; set; }
+    public object? Error { get; set; }
+}
+
 public sealed class DockerHttpRequestResult : ToolResult
 {
     public string? Url { get; set; }

@@ -75,6 +75,7 @@ else
 
 builder.Services.AddSingleton<DockerGuard>();
 builder.Services.AddSingleton<DockerContainerService>();
+builder.Services.AddSingleton<DockerShellSessionService>();
 builder.Services.AddSingleton<DockerImageService>();
 builder.Services.AddSingleton<SystemService>();
 builder.Services.AddSingleton<SkillService>();

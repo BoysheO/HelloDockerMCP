@@ -6,10 +6,12 @@ using System.Text.Json;
 public sealed class DockerTools
 {
     private readonly DockerContainerService _docker;
+    private readonly DockerShellSessionService _shellSessions;
 
-    public DockerTools(DockerContainerService docker)
+    public DockerTools(DockerContainerService docker, DockerShellSessionService shellSessions)
     {
         _docker = docker;
+        _shellSessions = shellSessions;
     }
 
     [McpServerTool(UseStructuredContent = true, OutputSchemaType = typeof(DockerContainerListItemResult[]))]
@@ -230,6 +232,99 @@ public sealed class DockerTools
         string? container = null)
     {
         return await _docker.InspectContainerAsync(container);
+    }
+
+    [McpServerTool(UseStructuredContent = true, OutputSchemaType = typeof(DockerShellStartResult))]
+    [Description("[Persistent Docker Shell API] Start an interactive shell session inside a running container, similar to docker exec -it. idleTimeoutSeconds is required; use 3600 for a one-hour idle timeout.")]
+    public async Task<object> DockerShellStart(
+        [Description("Container name or container id. The container must already be running.")]
+        string? container = null,
+
+        [Description("Shell executable to start. Defaults to /bin/bash and falls back to /bin/sh when bash is unavailable.")]
+        string? shell = null,
+
+        [Description("Optional working directory inside the container.")]
+        string? workdir = null,
+
+        [Description("Optional environment variables for the session.")]
+        IReadOnlyDictionary<string, string>? env = null,
+
+        [Description("Allocate a TTY. Defaults to true.")]
+        bool tty = true,
+
+        [Description("TTY column count. Defaults to 120.")]
+        int cols = 120,
+
+        [Description("TTY row count. Defaults to 30.")]
+        int rows = 30,
+
+        [Description("Required idle timeout in seconds. A valid operation refreshes this timeout; recommended value is 3600.")]
+        int idleTimeoutSeconds = 0)
+    {
+        return await _shellSessions.StartAsync(container, shell, workdir, env, tty, cols, rows, idleTimeoutSeconds);
+    }
+
+    [McpServerTool(UseStructuredContent = true, OutputSchemaType = typeof(DockerShellWriteResult))]
+    [Description("[Persistent Docker Shell API] Write command text or stdin to a previously started Docker shell session. Include newline characters when submitting shell commands.")]
+    public async Task<object> DockerShellWrite(
+        [Description("Session id returned by docker_shell_start.")]
+        string? sessionId = null,
+
+        [Description("Input text to write to the shell or interactive program.")]
+        string? input = null)
+    {
+        return await _shellSessions.WriteAsync(sessionId, input);
+    }
+
+    [McpServerTool(UseStructuredContent = true, OutputSchemaType = typeof(DockerShellReadResult))]
+    [Description("[Persistent Docker Shell API] Read buffered stdout and stderr from a Docker shell session. Output is consumed by reads.")]
+    public async Task<object> DockerShellRead(
+        [Description("Session id returned by docker_shell_start.")]
+        string? sessionId = null,
+
+        [Description("Maximum wait in milliseconds when no output is currently buffered. Defaults to 1000.")]
+        int timeoutMs = 1000,
+
+        [Description("Maximum bytes to return in this read. Defaults to 65536.")]
+        int maxBytes = 65536)
+    {
+        return await _shellSessions.ReadAsync(sessionId, timeoutMs, maxBytes);
+    }
+
+    [McpServerTool(UseStructuredContent = true, OutputSchemaType = typeof(DockerShellActionResult))]
+    [Description("[Persistent Docker Shell API] Close a Docker shell session and release server resources. The operation is idempotent.")]
+    public async Task<object> DockerShellClose(
+        [Description("Session id returned by docker_shell_start.")]
+        string? sessionId = null)
+    {
+        return await _shellSessions.CloseAsync(sessionId);
+    }
+
+    [McpServerTool(UseStructuredContent = true, OutputSchemaType = typeof(DockerShellActionResult))]
+    [Description("[Persistent Docker Shell API] Send a control signal to a Docker shell session. Supported values: SIGINT, SIGTERM, SIGKILL, EOF.")]
+    public async Task<object> DockerShellSignal(
+        [Description("Session id returned by docker_shell_start.")]
+        string? sessionId = null,
+
+        [Description("Signal to send. Supported values: SIGINT, SIGTERM, SIGKILL, EOF.")]
+        string? signal = "SIGINT")
+    {
+        return await _shellSessions.SignalAsync(sessionId, signal);
+    }
+
+    [McpServerTool(UseStructuredContent = true, OutputSchemaType = typeof(DockerShellActionResult))]
+    [Description("[Persistent Docker Shell API] Resize the TTY of a Docker shell session.")]
+    public async Task<object> DockerShellResize(
+        [Description("Session id returned by docker_shell_start.")]
+        string? sessionId = null,
+
+        [Description("TTY column count.")]
+        int cols = 120,
+
+        [Description("TTY row count.")]
+        int rows = 40)
+    {
+        return await _shellSessions.ResizeAsync(sessionId, cols, rows);
     }
 
     [McpServerTool(UseStructuredContent = true, OutputSchemaType = typeof(DockerHttpRequestResult))]
