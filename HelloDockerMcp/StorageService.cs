@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 
 public sealed class StorageService
 {
@@ -18,6 +19,16 @@ public sealed class StorageService
     }
 
     public string RootPath => _rootPath;
+
+    public string ResolveStoragePath(string? path)
+    {
+        return ResolvePath(path);
+    }
+
+    public string ResolveStorageFile(string? path)
+    {
+        return ResolveRequiredFile(path);
+    }
 
     public object GetInfo()
     {
@@ -307,6 +318,52 @@ public sealed class StorageService
         }
     }
 
+    public async Task<object> BatchAsync(JsonElement? operations)
+    {
+        try
+        {
+            if (operations is null || operations.Value.ValueKind != JsonValueKind.Array)
+            {
+                return Error("MISSING_REQUIRED_ARGUMENT", "operations must be an array.");
+            }
+
+            var results = new List<object>();
+            foreach (var operation in operations.Value.EnumerateArray())
+            {
+                var action = operation.TryGetProperty("action", out var actionElement)
+                    ? actionElement.GetString()
+                    : null;
+                var path = operation.TryGetProperty("path", out var pathElement)
+                    ? pathElement.GetString()
+                    : null;
+
+                results.Add(action?.Trim().ToLowerInvariant() switch
+                {
+                    "list" => List(path, GetBool(operation, "recursive", false)),
+                    "readText" or "read_text" => await ReadTextAsync(path, GetInt(operation, "maxBytes", 262144)),
+                    "writeText" or "write_text" => await WriteTextAsync(path, GetString(operation, "content"), GetBool(operation, "overwrite", true)),
+                    "writeBase64" or "write_base64" => await WriteBase64Async(path, GetString(operation, "base64Content"), GetBool(operation, "overwrite", true)),
+                    "createDirectory" or "create_directory" => CreateDirectory(path),
+                    "move" => Move(path, GetString(operation, "destinationPath"), GetBool(operation, "overwrite", true)),
+                    "copy" => Copy(path, GetString(operation, "destinationPath"), GetBool(operation, "overwrite", true)),
+                    "delete" => Delete(path, GetBool(operation, "recursive", false)),
+                    _ => Error("INVALID_BATCH_ACTION", $"Unsupported storage batch action: {action}.")
+                });
+            }
+
+            return new
+            {
+                ok = true,
+                count = results.Count,
+                results
+            };
+        }
+        catch (Exception ex)
+        {
+            return ToErrorResult(ex);
+        }
+    }
+
     private string ResolveRequiredFile(string? path)
     {
         var fullPath = ResolvePath(path);
@@ -492,6 +549,27 @@ public sealed class StorageService
         {
             File.Delete(path);
         }
+    }
+
+    private static string? GetString(JsonElement operation, string name)
+    {
+        return operation.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+    }
+
+    private static bool GetBool(JsonElement operation, string name, bool defaultValue)
+    {
+        return operation.TryGetProperty(name, out var value) && value.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? value.GetBoolean()
+            : defaultValue;
+    }
+
+    private static int GetInt(JsonElement operation, string name, int defaultValue)
+    {
+        return operation.TryGetProperty(name, out var value) && value.TryGetInt32(out var result)
+            ? result
+            : defaultValue;
     }
 
     private static object ToErrorResult(Exception ex)

@@ -6,6 +6,7 @@ run.bat
 **/bin
 **/obj
 **/publish
+**/logs
 
 # Ignore storage contents except test.txt
 storage/*

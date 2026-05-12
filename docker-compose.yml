@@ -23,14 +23,18 @@ services:
     working_dir: /src
     environment:
       DOCKER_HOST: http://docker-dind:2375
+      OAuth__Enabled: ${HELLO_DOCKER_OAUTH_ENABLED:-true}
       OAuth__Issuer: ${HELLO_DOCKER_OAUTH_ISSUER:-http://localhost:5001}
       OAuth__SigningKey: ${HELLO_DOCKER_OAUTH_SIGNING_KEY:-dev-only-change-me-at-least-32-bytes}
       OAuth__Scope: ${HELLO_DOCKER_OAUTH_SCOPE:-mcp}
       OAuth__ResourceName: ${HELLO_DOCKER_OAUTH_RESOURCE_NAME:-Hello Docker MCP}
+      Skill__Path: /skill/Skill.md
       # Storage__RootPath: /storage
     volumes:
       - ./HelloDockerMcp:/src
       - ./storage:/storage
+      - ./HelloDockerMcp/Skill.md:/skill/Skill.md
+      - ./logs:/src/logs
     command: sh -c "dotnet restore && dotnet run --no-restore --urls http://*:5000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]

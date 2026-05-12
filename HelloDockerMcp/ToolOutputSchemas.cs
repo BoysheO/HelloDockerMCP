@@ -26,10 +26,9 @@ public sealed class DockerContainerListItemResult : ToolResult
     public object? Ports { get; set; }
 }
 
-public sealed class DockerAvailableImagesResult : ToolResult
+public sealed class DockerTrustedRegistriesResult : ToolResult
 {
-    public IReadOnlyList<string>? Images { get; set; }
-    public IReadOnlyList<string>? ImageNames { get; set; }
+    public IReadOnlyList<string>? TrustedRegistries { get; set; }
     public DockerResourceLimitsResult? ResourceLimits { get; set; }
 }
 
@@ -62,6 +61,7 @@ public sealed class DockerCreateContainerResult : ToolResult
     public IReadOnlyList<string>? Command { get; set; }
     public string? StorageMount { get; set; }
     public bool? Created { get; set; }
+    public object? PullProgress { get; set; }
     public object? Details { get; set; }
     public object? AcceptedArgs { get; set; }
 }
@@ -83,6 +83,7 @@ public sealed class DockerComposeCreatedContainerResult
     public string? Image { get; set; }
     public IReadOnlyList<string>? Command { get; set; }
     public bool? Created { get; set; }
+    public object? PullProgress { get; set; }
 }
 
 public sealed class DockerRunContainerResult : ToolResult
@@ -98,6 +99,7 @@ public sealed class DockerRunContainerResult : ToolResult
     public long? DurationMs { get; set; }
     public bool? AutoRemoved { get; set; }
     public IReadOnlyList<object>? Warnings { get; set; }
+    public object? PullProgress { get; set; }
     public object? Details { get; set; }
     public object? AcceptedArgs { get; set; }
 }
@@ -113,6 +115,65 @@ public sealed class DockerContainerActionResult : ToolResult
     public bool? Force { get; set; }
     public object? Details { get; set; }
     public object? AcceptedArgs { get; set; }
+}
+
+public sealed class DockerBatchContainerActionResult : ToolResult
+{
+    public IReadOnlyList<object>? Removed { get; set; }
+    public int? Count { get; set; }
+    public IReadOnlyList<object>? Warnings { get; set; }
+    public bool? Force { get; set; }
+}
+
+public sealed class DockerBuildAndRunResult : ToolResult
+{
+    public string? Image { get; set; }
+    public bool? Built { get; set; }
+    public object? BuildProgress { get; set; }
+    public object? Run { get; set; }
+}
+
+public sealed class DockerRunComposeResult : ToolResult
+{
+    public object? Created { get; set; }
+    public IReadOnlyList<object>? Started { get; set; }
+    public int? Count { get; set; }
+    public string? Note { get; set; }
+}
+
+public sealed class DockerImageListItemResult : ToolResult
+{
+    public string? Id { get; set; }
+    public IReadOnlyList<string>? RepoTags { get; set; }
+    public IReadOnlyList<string>? RepoDigests { get; set; }
+    public long? SizeBytes { get; set; }
+    public DateTime? Created { get; set; }
+}
+
+public sealed class DockerImageActionResult : ToolResult
+{
+    public string? Image { get; set; }
+    public bool? Pulled { get; set; }
+    public bool? Force { get; set; }
+    public object? Progress { get; set; }
+    public object? Deleted { get; set; }
+}
+
+public sealed class DockerImageTagResult : ToolResult
+{
+    public string? SourceImage { get; set; }
+    public string? Repository { get; set; }
+    public string? Tag { get; set; }
+    public bool? Tagged { get; set; }
+}
+
+public sealed class DockerImageBuildResult : ToolResult
+{
+    public string? ContextPath { get; set; }
+    public string? DockerfilePath { get; set; }
+    public IReadOnlyList<string>? Tags { get; set; }
+    public bool? Built { get; set; }
+    public object? Progress { get; set; }
 }
 
 public sealed class DockerContainerLogsResult : ToolResult
@@ -258,4 +319,17 @@ public sealed class StorageDeleteResult : ToolResult
 {
     public string? Path { get; set; }
     public bool? Deleted { get; set; }
+}
+
+public sealed class StorageBatchResult : ToolResult
+{
+    public int? Count { get; set; }
+    public IReadOnlyList<object>? Results { get; set; }
+}
+
+public sealed class SkillReadResult : ToolResult
+{
+    public bool? Available { get; set; }
+    public string? Path { get; set; }
+    public string? Content { get; set; }
 }

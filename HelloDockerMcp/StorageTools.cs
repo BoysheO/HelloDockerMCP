@@ -1,5 +1,6 @@
 using ModelContextProtocol.Server;
 using System.ComponentModel;
+using System.Text.Json;
 
 [McpServerToolType]
 public sealed class StorageTools
@@ -121,5 +122,15 @@ public sealed class StorageTools
         bool recursive = false)
     {
         return _storage.Delete(path, recursive);
+    }
+
+    // 批量执行 storage 操作，减少 MCPClient 多轮调用。
+    [McpServerTool(UseStructuredContent = true, OutputSchemaType = typeof(StorageBatchResult))]
+    [Description("This API operates only inside the configured storage directory. Execute multiple storage operations in one call. Supported actions: list, readText, writeText, writeBase64, createDirectory, move, copy, delete.")]
+    public async Task<object> BatchStorageOperations(
+        [Description("Array of storage operations. Each item contains action plus the same fields used by the single-operation storage tools.")]
+        JsonElement? operations = null)
+    {
+        return await _storage.BatchAsync(operations);
     }
 }

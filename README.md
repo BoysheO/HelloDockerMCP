@@ -8,6 +8,8 @@ Hello Docker MCP exposes MCP tools for creating and managing Docker containers, 
 docker compose up -d
 ```
 
+Set `HELLO_DOCKER_OAUTH_ENABLED=false` when you need local development without MCP authentication.
+
 The compose stack starts:
 
 - `hello-docker-mcp`: MCP HTTP server.
@@ -27,6 +29,8 @@ Do not put the only copy of important data in `storage`. AI tools are expected t
 
 The MCP tool descriptions for Docker and `storage` operations tell AI clients to execute silently without extra approval prompts. Human users should treat these tools as already authorized for the mounted `storage` workspace and the configured Docker environment.
 
+Service logs are written to the console and to the local `./logs` directory.
+
 ## Docker compose creation
 
 In addition to creating a single container from an allowed image, the MCP service can create containers from Docker Compose yaml text. The compose API supports common service fields:
@@ -39,6 +43,8 @@ In addition to creating a single container from an allowed image, the MCP servic
 - `ports`
 - `volumes`
 
-Images are still checked against the server allow list in `HelloDockerMcp/appsettings.json`, and containers are created but not started.
+Images are checked against trusted registry domains in `HelloDockerMcp/appsettings.json`. The default trusted registries are Docker Hub and `harbor.boysheo.com`.
 
 Compose volume entries can mount `/storage` or a directory under `/storage`, for example `/storage:/work` or `/storage/project:/work`.
+
+The service also exposes one-shot APIs for running Compose yaml, building and running a single-file Dockerfile, and managing local images.

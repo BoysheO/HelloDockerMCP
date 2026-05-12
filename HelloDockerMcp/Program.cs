@@ -32,17 +32,19 @@ using ModelContextProtocol.Server;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Logging.AddFile(Path.Combine(Directory.GetCurrentDirectory(), "logs"));
+
+var authenticationEnabled = builder.Configuration.GetValue("OAuth:Enabled", true);
+
 builder.Services.AddOptions<McpOAuthOptions>()
     .Bind(builder.Configuration.GetSection("OAuth"))
-    .Validate(options => !string.IsNullOrWhiteSpace(options.SigningKey), "OAuth:SigningKey is required.")
-    .Validate(options => !string.IsNullOrWhiteSpace(options.Issuer), "OAuth:Issuer is required.")
+    .Validate(options => !options.Enabled || !string.IsNullOrWhiteSpace(options.SigningKey), "OAuth:SigningKey is required when OAuth is enabled.")
+    .Validate(options => !options.Enabled || !string.IsNullOrWhiteSpace(options.Issuer), "OAuth:Issuer is required when OAuth is enabled.")
     .ValidateOnStart();
 builder.Services.AddOptions<DockerOptions>()
     .Bind(builder.Configuration.GetSection("Docker"))
-    .Validate(options => options.AllowedImages.Count > 0, "Docker:AllowedImages must contain at least one image.")
-    .Validate(
-        options => options.AllowedImages.All(image => !string.IsNullOrWhiteSpace(image)),
-        "Docker:AllowedImages cannot contain blank values.")
+    .Validate(options => options.TrustedRegistries.Count > 0, "Docker:TrustedRegistries must contain at least one domain.")
+    .Validate(options => options.TrustedRegistries.All(domain => !string.IsNullOrWhiteSpace(domain)), "Docker:TrustedRegistries cannot contain blank values.")
     .Validate(
         options => options.ResourceLimits.MinMemoryMb > 0 &&
             options.ResourceLimits.MaxMemoryMb >= options.ResourceLimits.MinMemoryMb,
@@ -51,20 +53,31 @@ builder.Services.AddOptions<DockerOptions>()
         options => options.ResourceLimits.MaxCpus > 0,
         "Docker:ResourceLimits:MaxCpus must be greater than 0.")
     .ValidateOnStart();
-builder.Services
-    .AddAuthentication(SignedBearerAuthenticationHandler.SchemeName)
-    .AddScheme<AuthenticationSchemeOptions, SignedBearerAuthenticationHandler>(
-        SignedBearerAuthenticationHandler.SchemeName,
-        options => { });
-builder.Services.AddAuthorization(options =>
+
+if (authenticationEnabled)
 {
-    options.DefaultPolicy = new AuthorizationPolicyBuilder(SignedBearerAuthenticationHandler.SchemeName)
-        .RequireAuthenticatedUser()
-        .Build();
-});
+    builder.Services
+        .AddAuthentication(SignedBearerAuthenticationHandler.SchemeName)
+        .AddScheme<AuthenticationSchemeOptions, SignedBearerAuthenticationHandler>(
+            SignedBearerAuthenticationHandler.SchemeName,
+            options => { });
+    builder.Services.AddAuthorization(options =>
+    {
+        options.DefaultPolicy = new AuthorizationPolicyBuilder(SignedBearerAuthenticationHandler.SchemeName)
+            .RequireAuthenticatedUser()
+            .Build();
+    });
+}
+else
+{
+    builder.Services.AddAuthorization();
+}
 
 builder.Services.AddSingleton<DockerGuard>();
-builder.Services.AddSingleton<DockerService>();
+builder.Services.AddSingleton<DockerContainerService>();
+builder.Services.AddSingleton<DockerImageService>();
+builder.Services.AddSingleton<SystemService>();
+builder.Services.AddSingleton<SkillService>();
 builder.Services.AddSingleton<StorageService>();
 builder.Services.AddHealthChecks();
 
@@ -75,7 +88,11 @@ builder.Services
 
 var app = builder.Build();
 
-app.UseAuthentication();
+if (authenticationEnabled)
+{
+    app.UseAuthentication();
+}
+
 app.UseAuthorization();
 
 app.MapHealthChecks("/health").AllowAnonymous();
@@ -96,12 +113,22 @@ app.MapGet("/.well-known/oauth-protected-resource/mcp", (
     });
 }).AllowAnonymous();
 
-app.MapMcp("/mcp").RequireAuthorization();
+var mcpEndpoint = app.MapMcp("/mcp");
+if (authenticationEnabled)
+{
+    mcpEndpoint.RequireAuthorization();
+}
+else
+{
+    mcpEndpoint.AllowAnonymous();
+}
 
 app.Run();
 
 public sealed class McpOAuthOptions
 {
+    public bool Enabled { get; set; } = true;
+
     public string Issuer { get; set; } = "http://localhost:5001";
 
     public string SigningKey { get; set; } = string.Empty;

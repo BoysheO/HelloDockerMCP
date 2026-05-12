@@ -3,32 +3,26 @@ using Microsoft.Extensions.Options;
 public sealed class DockerGuard
 {
     private readonly DockerOptions _options;
-    private readonly HashSet<string> _allowedImageNames;
+    private readonly HashSet<string> _trustedRegistries;
 
     public DockerGuard(IOptions<DockerOptions> options)
     {
         _options = options.Value;
-        _allowedImageNames = new HashSet<string>(
-            _options.AllowedImages.Select(NormalizeImageName),
+        _trustedRegistries = new HashSet<string>(
+            _options.TrustedRegistries.Select(NormalizeRegistry),
             StringComparer.OrdinalIgnoreCase);
     }
 
-    public IReadOnlyList<string> AllowedImageList => _options.AllowedImages
-        .Select(image => image.Trim())
+    public IReadOnlyList<string> TrustedRegistryList => _trustedRegistries
         .Order(StringComparer.OrdinalIgnoreCase)
         .ToList();
 
-    public IReadOnlyList<string> AllowedImageNameList => _allowedImageNames
-        .Order(StringComparer.OrdinalIgnoreCase)
-        .ToList();
-
-    public object GetAvailableImages()
+    public object GetTrustedRegistries()
     {
         return new
         {
             ok = true,
-            images = AllowedImageList,
-            imageNames = AllowedImageNameList,
+            trustedRegistries = TrustedRegistryList,
             resourceLimits = new
             {
                 memoryMb = new
@@ -47,14 +41,14 @@ public sealed class DockerGuard
 
     public void ValidateImage(string image)
     {
-        var imageName = NormalizeImageName(image);
-        if (!_allowedImageNames.Contains(imageName))
+        var registry = GetRegistry(image);
+        if (!_trustedRegistries.Contains(registry))
         {
             throw new DockerToolException(
-                "IMAGE_NOT_ALLOWED",
-                $"Image not allowed: {image}.",
-                $"Use one of the allowed image names: {string.Join(", ", AllowedImageNameList)}.",
-                new { imageName = AllowedImageNameList });
+                "REGISTRY_NOT_TRUSTED",
+                $"Image registry is not trusted: {registry}.",
+                $"Use an image from one of the trusted registries: {string.Join(", ", TrustedRegistryList)}.",
+                new { trustedRegistries = TrustedRegistryList });
         }
     }
 
@@ -94,36 +88,39 @@ public sealed class DockerGuard
         }
     }
 
-    private static string NormalizeImageName(string image)
+    private static string GetRegistry(string image)
     {
         var normalized = image.Trim();
-        var digestIndex = normalized.IndexOf('@', StringComparison.Ordinal);
-        if (digestIndex >= 0)
+        var slashIndex = normalized.IndexOf('/');
+        if (slashIndex <= 0)
         {
-            normalized = normalized[..digestIndex];
+            return "docker.io";
         }
 
-        var lastSlashIndex = normalized.LastIndexOf('/');
-        var lastColonIndex = normalized.LastIndexOf(':');
-        if (lastColonIndex > lastSlashIndex)
+        var firstSegment = normalized[..slashIndex];
+        if (firstSegment.Contains('.') ||
+            firstSegment.Contains(':') ||
+            string.Equals(firstSegment, "localhost", StringComparison.OrdinalIgnoreCase))
         {
-            normalized = normalized[..lastColonIndex];
+            return NormalizeRegistry(firstSegment);
         }
 
-        return normalized;
+        return "docker.io";
+    }
+
+    private static string NormalizeRegistry(string registry)
+    {
+        return registry.Trim().TrimEnd('/').ToLowerInvariant();
     }
 }
 
 public sealed class DockerOptions
 {
-    public List<string> AllowedImages { get; set; } =
+    public List<string> TrustedRegistries { get; set; } =
     [
-        "nginx:alpine",
-        "redis:7-alpine",
-        "python:3.12-alpine",
-        "alpine:latest",
-        "hello-world:latest",
-        "hello-world"
+        "docker.io",
+        "registry-1.docker.io",
+        "harbor.boysheo.com"
     ];
 
     public DockerResourceLimitsOptions ResourceLimits { get; set; } = new();
