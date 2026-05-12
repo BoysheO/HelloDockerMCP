@@ -271,7 +271,6 @@ public sealed class DockerContainerService
                 }
             }
 
-            var logs = await ReadLogsAsync(containerId, tail: 500);
             var exitCode = timedOut ? null : waitResult?.StatusCode;
             var removeResult = await TryAutoRemoveAsync(containerId, autoRemove, warnings);
             stopwatch.Stop();
@@ -287,15 +286,15 @@ public sealed class DockerContainerService
                     storageMount = storageBind,
                     pullProgress,
                     exitCode,
-                    logs.stdout,
-                    logs.stderr,
                     timedOut = true,
                     durationMs = stopwatch.ElapsedMilliseconds,
                     autoRemoved = removeResult,
                     warnings,
                     errorCode = "CONTAINER_TIMEOUT",
                     message = $"Container did not finish within {timeoutSeconds} seconds.",
-                    hint = "Increase timeoutSeconds or inspect the container logs."
+                    hint = autoRemove
+                        ? "Increase timeoutSeconds or rerun with autoRemove=false, then query logs with get_container_logs."
+                        : "Increase timeoutSeconds or query logs with get_container_logs."
                 };
             }
 
@@ -309,15 +308,17 @@ public sealed class DockerContainerService
                 storageMount = storageBind,
                 pullProgress,
                 exitCode,
-                logs.stdout,
-                logs.stderr,
                 timedOut = false,
                 durationMs = stopwatch.ElapsedMilliseconds,
                 autoRemoved = removeResult,
                 warnings,
                 errorCode = ok ? null : "CONTAINER_EXITED_NON_ZERO",
                 message = ok ? null : $"Container exited with code {exitCode}.",
-                hint = ok ? null : "Read stdout and stderr to determine why the command failed."
+                hint = ok
+                    ? null
+                    : autoRemove
+                        ? "Rerun with autoRemove=false, then query logs with get_container_logs."
+                        : "Query logs with get_container_logs to determine why the command failed."
             };
         }
         catch (Exception ex)
@@ -679,19 +680,15 @@ public sealed class DockerContainerService
         var json = JsonSerializer.Serialize(result);
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
-        var stdout = root.TryGetProperty("stdout", out var stdoutElement) ? stdoutElement.GetString() : null;
         var ok = root.TryGetProperty("ok", out var okElement) && okElement.GetBoolean();
 
         return new
         {
             ok,
-            message = stdout?.Contains("Hello from Docker!", StringComparison.OrdinalIgnoreCase) == true
-                ? "Hello from Docker!"
-                : null,
+            message = ok ? "Hello-world container completed successfully." : null,
             dockerDaemonReachable = ok,
             imagePullWorks = ok,
             containerRunWorks = ok,
-            stdout,
             run = result
         };
     }
@@ -1329,7 +1326,7 @@ public sealed class DockerContainerService
         }
         catch
         {
-            // Timeout results should still return logs even if stop fails.
+            // Timeout results should still report lifecycle state even if stop fails.
         }
     }
 

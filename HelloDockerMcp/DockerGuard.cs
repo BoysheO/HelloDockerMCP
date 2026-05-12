@@ -2,23 +2,20 @@ using Microsoft.Extensions.Options;
 
 public sealed class DockerGuard
 {
-    private readonly DockerOptions _options;
-    private readonly HashSet<string> _trustedRegistries;
+    private readonly IOptionsMonitor<DockerOptions> _options;
 
-    public DockerGuard(IOptions<DockerOptions> options)
+    public DockerGuard(IOptionsMonitor<DockerOptions> options)
     {
-        _options = options.Value;
-        _trustedRegistries = new HashSet<string>(
-            _options.TrustedRegistries.Select(NormalizeRegistry),
-            StringComparer.OrdinalIgnoreCase);
+        _options = options;
     }
 
-    public IReadOnlyList<string> TrustedRegistryList => _trustedRegistries
+    public IReadOnlyList<string> TrustedRegistryList => GetTrustedRegistrySet()
         .Order(StringComparer.OrdinalIgnoreCase)
         .ToList();
 
     public object GetTrustedRegistries()
     {
+        var options = _options.CurrentValue;
         return new
         {
             ok = true,
@@ -27,13 +24,13 @@ public sealed class DockerGuard
             {
                 memoryMb = new
                 {
-                    minimum = _options.ResourceLimits.MinMemoryMb,
-                    maximum = _options.ResourceLimits.MaxMemoryMb
+                    minimum = options.ResourceLimits.MinMemoryMb,
+                    maximum = options.ResourceLimits.MaxMemoryMb
                 },
                 cpus = new
                 {
                     minimumExclusive = 0,
-                    maximum = _options.ResourceLimits.MaxCpus
+                    maximum = options.ResourceLimits.MaxCpus
                 }
             }
         };
@@ -42,19 +39,23 @@ public sealed class DockerGuard
     public void ValidateImage(string image)
     {
         var registry = GetRegistry(image);
-        if (!_trustedRegistries.Contains(registry))
+        var trustedRegistries = GetTrustedRegistrySet();
+        if (!trustedRegistries.Contains(registry))
         {
+            var trustedRegistryList = trustedRegistries
+                .Order(StringComparer.OrdinalIgnoreCase)
+                .ToList();
             throw new DockerToolException(
                 "REGISTRY_NOT_TRUSTED",
                 $"Image registry is not trusted: {registry}.",
-                $"Use an image from one of the trusted registries: {string.Join(", ", TrustedRegistryList)}.",
-                new { trustedRegistries = TrustedRegistryList });
+                $"Use an image from one of the trusted registries: {string.Join(", ", trustedRegistryList)}.",
+                new { trustedRegistries = trustedRegistryList });
         }
     }
 
     public void ValidateResourceLimits(long memoryMb, double cpus)
     {
-        var limits = _options.ResourceLimits;
+        var limits = _options.CurrentValue.ResourceLimits;
         if (memoryMb < limits.MinMemoryMb || memoryMb > limits.MaxMemoryMb)
         {
             throw new DockerToolException(
@@ -111,6 +112,15 @@ public sealed class DockerGuard
     private static string NormalizeRegistry(string registry)
     {
         return registry.Trim().TrimEnd('/').ToLowerInvariant();
+    }
+
+    private HashSet<string> GetTrustedRegistrySet()
+    {
+        return new HashSet<string>(
+            _options.CurrentValue.TrustedRegistries
+                .Where(registry => !string.IsNullOrWhiteSpace(registry))
+                .Select(NormalizeRegistry),
+            StringComparer.OrdinalIgnoreCase);
     }
 }
 

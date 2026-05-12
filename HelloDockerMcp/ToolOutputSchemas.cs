@@ -93,8 +93,6 @@ public sealed class DockerRunContainerResult : ToolResult
     public string? Image { get; set; }
     public string? StorageMount { get; set; }
     public long? ExitCode { get; set; }
-    public string? Stdout { get; set; }
-    public string? Stderr { get; set; }
     public bool? TimedOut { get; set; }
     public long? DurationMs { get; set; }
     public bool? AutoRemoved { get; set; }
@@ -219,7 +217,6 @@ public sealed class DockerHelloWorldResult : ToolResult
     public bool? DockerDaemonReachable { get; set; }
     public bool? ImagePullWorks { get; set; }
     public bool? ContainerRunWorks { get; set; }
-    public string? Stdout { get; set; }
     public DockerRunContainerResult? Run { get; set; }
 }
 

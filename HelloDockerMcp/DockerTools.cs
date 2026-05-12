@@ -74,8 +74,8 @@ public sealed class DockerTools
     }
 
     [McpServerTool(UseStructuredContent = true, OutputSchemaType = typeof(DockerRunContainerResult))]
-    // 创建并运行容器，包含镜像拉取、启动、等待、日志读取和可选清理，是首选一站式接口。
-    [Description("[One-shot Docker API] Pull if needed, create, run, wait, read logs, and optionally remove a Docker container. Prefer this tool for one-shot commands. Prefer specific version tags instead of latest. Optional storagePath mounts a directory inside storage. If the MCP client has not read the Skill yet, read it before using this complex tool. Example: {\"image\":\"alpine:3.20\",\"command\":[\"ls\",\"/storage\"],\"storagePath\":\"/\",\"containerPath\":\"/storage\"}.")]
+    // 创建并运行容器，包含镜像拉取、启动、等待和可选清理；命令日志通过 GetContainerLogs 单独查询。
+    [Description("[One-shot Docker API] Pull if needed, create, run, wait, and optionally remove a Docker container. This tool does not return command stdout or stderr; call get_container_logs with the returned container id or name to query logs. Prefer specific version tags instead of latest. Optional storagePath mounts a directory inside storage. If the MCP client has not read the Skill yet, read it before using this complex tool. Example: {\"image\":\"alpine:3.20\",\"command\":[\"ls\",\"/storage\"],\"storagePath\":\"/\",\"containerPath\":\"/storage\"}.")]
     public async Task<object> RunContainer(
         [Description("Docker image from a trusted registry. Prefer a specific version tag instead of latest.")]
         string? image = null,
@@ -95,8 +95,8 @@ public sealed class DockerTools
         [Description("Wait timeout in seconds. Allowed range: 1-300.")]
         int timeoutSeconds = 30,
 
-        [Description("Remove the container after it exits or times out. Defaults to true for one-shot tasks.")]
-        bool autoRemove = true,
+        [Description("Remove the container after it exits or times out. Defaults to false so logs can be queried with get_container_logs.")]
+        bool autoRemove = false,
 
         [Description("Optional directory path inside storage to mount. Use empty string or / for the storage root. When omitted, no storage directory is mounted.")]
         string? storagePath = null,
@@ -135,8 +135,8 @@ public sealed class DockerTools
         [Description("Wait timeout in seconds. Allowed range: 1-300.")]
         int timeoutSeconds = 30,
 
-        [Description("Remove the container after it exits or times out.")]
-        bool autoRemove = true)
+        [Description("Remove the container after it exits or times out. Defaults to false so logs can be queried with get_container_logs.")]
+        bool autoRemove = false)
     {
         return await _docker.RunDockerfileContainerAsync(dockerfile, imageTag, name, command, memoryMb, cpus, timeoutSeconds, autoRemove);
     }
@@ -211,7 +211,7 @@ public sealed class DockerTools
 
     [McpServerTool(UseStructuredContent = true, OutputSchemaType = typeof(DockerContainerLogsResult))]
     // 获取容器日志，便于开发者定位启动失败或命令输出。
-    [Description("[Atomic Docker API] Get stdout and stderr logs from a container. For short-lived containers, use run_container instead. Maximum tail is 500 lines.")]
+    [Description("[Atomic Docker API] Query stdout and stderr logs from a Docker container. Use the container id or name returned by run_container, create_container, list_containers, or inspect_container. Maximum tail is 500 lines.")]
     public async Task<object> GetContainerLogs(
         [Description("Container name or container id.")]
         string? container = null,
@@ -253,7 +253,7 @@ public sealed class DockerTools
 
     [McpServerTool(UseStructuredContent = true, OutputSchemaType = typeof(DockerHelloWorldResult))]
     // 运行 hello-world 作为 Docker 连通性健康检查。
-    [Description("[One-shot Docker API] Run the Docker hello-world image as a quick health check. It creates, starts, waits, reads logs, and auto-removes the test container.")]
+    [Description("[One-shot Docker API] Run the Docker hello-world image as a quick health check. It creates, starts, waits, and auto-removes the test container. Command logs are not returned.")]
     public async Task<object> RunHelloWorld()
     {
         return await _docker.RunHelloWorldAsync();
