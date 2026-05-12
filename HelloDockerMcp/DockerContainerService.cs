@@ -213,7 +213,8 @@ public sealed class DockerContainerService
         bool autoRemove,
         string? storagePath = null,
         string? containerPath = null,
-        bool storageReadOnly = false)
+        bool storageReadOnly = false,
+        bool pullIfMissing = true)
     {
         var stopwatch = Stopwatch.StartNew();
         string? containerId = null;
@@ -232,7 +233,7 @@ public sealed class DockerContainerService
             var argv = ParseCommand(command);
             var storageBind = ResolveStorageDirectoryBind(storagePath, containerPath, storageReadOnly);
 
-            var pullProgress = await PullImageAsync(normalizedImage);
+            var pullProgress = await EnsureImageAvailableAsync(normalizedImage, pullIfMissing);
 
             var createResult = await _client.Containers.CreateContainerAsync(
                 CreateParameters(normalizedImage, containerName, argv, memoryMb, cpus, autoRemove: false, storageBind: storageBind));
@@ -351,7 +352,7 @@ public sealed class DockerContainerService
             }
 
             var buildProgress = await _images.BuildImageFromDockerfileTextForRunAsync(dockerfile, tag, noCache: false);
-            var run = await RunContainerAsync(tag, name, command, memoryMb, cpus, timeoutSeconds, autoRemove);
+            var run = await RunContainerAsync(tag, name, command, memoryMb, cpus, timeoutSeconds, autoRemove, pullIfMissing: false);
             var runOk = false;
             using (var document = JsonDocument.Parse(JsonSerializer.Serialize(run)))
             {
@@ -1235,6 +1236,45 @@ public sealed class DockerContainerService
             .ToArray())
             .Trim('-');
         return safe[..Math.Min(48, safe.Length)];
+    }
+
+    private async Task<IReadOnlyList<object>> EnsureImageAvailableAsync(string image, bool pullIfMissing)
+    {
+        var localImage = await TryInspectLocalImageAsync(image);
+        if (localImage is not null)
+        {
+            return new List<object>
+            {
+                new
+                {
+                    status = "Using local image; pull skipped.",
+                    id = ShortId(localImage.ID),
+                    skippedPull = true
+                }
+            };
+        }
+
+        if (!pullIfMissing)
+        {
+            throw new DockerToolException(
+                "LOCAL_IMAGE_NOT_FOUND",
+                $"Local image not found: {image}.",
+                "The image was expected to exist locally because it was just built. Check Docker build output and Docker daemon state.");
+        }
+
+        return await PullImageAsync(image);
+    }
+
+    private async Task<ImageInspectResponse?> TryInspectLocalImageAsync(string image)
+    {
+        try
+        {
+            return await _client.Images.InspectImageAsync(image);
+        }
+        catch (DockerApiException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
     }
 
     private async Task<IReadOnlyList<object>> PullImageAsync(string image)
