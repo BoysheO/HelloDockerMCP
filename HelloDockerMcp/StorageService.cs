@@ -5,6 +5,7 @@ using System.Text.Json;
 public sealed class StorageService
 {
     private const string DefaultRootPath = "/storage";
+    private const int MaxRecursiveListEntries = 500;
     private readonly string _rootPath;
 
     public StorageService(IConfiguration configuration)
@@ -43,7 +44,7 @@ public sealed class StorageService
         };
     }
 
-    public object List(string? path, bool recursive)
+    public object List(string? path, bool recursive, string? detailLevel = null)
     {
         try
         {
@@ -53,25 +54,37 @@ public sealed class StorageService
                 return Error("DIRECTORY_NOT_FOUND", $"Directory not found: {NormalizeRelativePath(path)}.");
             }
 
+            var details = ParseListDetailLevel(detailLevel);
             var option = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
-            var entries = Directory.EnumerateFileSystemEntries(fullPath, "*", option)
-                .Select(entry =>
+            var rawEntries = Directory.EnumerateFileSystemEntries(fullPath, "*", option);
+            if (recursive)
+            {
+                var checkedCount = 0;
+                foreach (var _ in rawEntries)
                 {
-                    var isDirectory = Directory.Exists(entry);
-                    var info = isDirectory
-                        ? new DirectoryInfo(entry) as FileSystemInfo
-                        : new FileInfo(entry);
-                    return new
+                    checkedCount++;
+                    if (checkedCount > MaxRecursiveListEntries)
                     {
-                        path = ToStoragePath(entry),
-                        name = Path.GetFileName(entry),
-                        type = isDirectory ? "directory" : "file",
-                        sizeBytes = isDirectory ? null : (long?)new FileInfo(entry).Length,
-                        lastWriteTimeUtc = info.LastWriteTimeUtc,
-                        mode = GetUnixMode(entry)
-                    };
-                })
-                .OrderBy(entry => entry.path, StringComparer.OrdinalIgnoreCase)
+                        return new
+                        {
+                            ok = false,
+                            errorCode = "TOO_MANY_RECURSIVE_ENTRIES",
+                            message = $"Recursive listing found more than {MaxRecursiveListEntries} entries under {ToStoragePath(fullPath)}.",
+                            hint = "Use recursive=false and list one directory level at a time. Start with the current path, then query child directories individually.",
+                            path = ToStoragePath(fullPath),
+                            recursive,
+                            maxEntries = MaxRecursiveListEntries
+                        };
+                    }
+                }
+
+                rawEntries = Directory.EnumerateFileSystemEntries(fullPath, "*", option);
+            }
+
+            var entries = rawEntries
+                .Select(entry => CreateListEntry(entry, details))
+                .OrderBy(entry => entry.SortPath, StringComparer.OrdinalIgnoreCase)
+                .Select(entry => entry.Value)
                 .ToList();
 
             return new
@@ -79,6 +92,7 @@ public sealed class StorageService
                 ok = true,
                 path = ToStoragePath(fullPath),
                 recursive,
+                detailLevel = details.Name,
                 entries
             };
         }
@@ -86,6 +100,62 @@ public sealed class StorageService
         {
             return ToErrorResult(ex);
         }
+    }
+
+    private ListedStorageEntry CreateListEntry(string entry, StorageListDetailLevel details)
+    {
+        var name = Path.GetFileName(entry);
+        if (details == StorageListDetailLevel.Names)
+        {
+            return new ListedStorageEntry(ToStoragePath(entry), new
+            {
+                name
+            });
+        }
+
+        var isDirectory = Directory.Exists(entry);
+        if (details == StorageListDetailLevel.Types)
+        {
+            return new ListedStorageEntry(ToStoragePath(entry), new
+            {
+                name,
+                type = isDirectory ? "directory" : "file"
+            });
+        }
+
+        var info = isDirectory
+            ? new DirectoryInfo(entry) as FileSystemInfo
+            : new FileInfo(entry);
+
+        return new ListedStorageEntry(ToStoragePath(entry), new
+        {
+            path = ToStoragePath(entry),
+            name,
+            type = isDirectory ? "directory" : "file",
+            sizeBytes = isDirectory ? null : (long?)new FileInfo(entry).Length,
+            lastWriteTimeUtc = info.LastWriteTimeUtc,
+            mode = GetUnixMode(entry)
+        });
+    }
+
+    private static StorageListDetailLevel ParseListDetailLevel(string? detailLevel)
+    {
+        return detailLevel?.Trim().ToLowerInvariant() switch
+        {
+            null or "" or "name" or "names" => StorageListDetailLevel.Names,
+            "type" or "types" => StorageListDetailLevel.Types,
+            "metadata" or "full" or "all" => StorageListDetailLevel.Metadata,
+            _ => throw new StorageToolException("INVALID_LIST_DETAIL_LEVEL", "detailLevel must be one of: names, types, metadata.")
+        };
+    }
+
+    private sealed record ListedStorageEntry(string SortPath, object Value);
+
+    private sealed record StorageListDetailLevel(string Name)
+    {
+        public static readonly StorageListDetailLevel Names = new("names");
+        public static readonly StorageListDetailLevel Types = new("types");
+        public static readonly StorageListDetailLevel Metadata = new("metadata");
     }
 
     public async Task<object> ReadTextAsync(string? path, int maxBytes)
@@ -339,7 +409,7 @@ public sealed class StorageService
 
                 results.Add(action?.Trim().ToLowerInvariant() switch
                 {
-                    "list" => List(path, GetBool(operation, "recursive", false)),
+                    "list" => List(path, GetBool(operation, "recursive", false), GetString(operation, "detailLevel") ?? GetString(operation, "detail_level")),
                     "readText" or "read_text" => await ReadTextAsync(path, GetInt(operation, "maxBytes", 262144)),
                     "writeText" or "write_text" => await WriteTextAsync(path, GetString(operation, "content"), GetBool(operation, "overwrite", true)),
                     "writeBase64" or "write_base64" => await WriteBase64Async(path, GetString(operation, "base64Content"), GetBool(operation, "overwrite", true)),

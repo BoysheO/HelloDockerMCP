@@ -268,6 +268,8 @@ public sealed class StorageListResult : ToolResult
 {
     public string? Path { get; set; }
     public bool? Recursive { get; set; }
+    public string? DetailLevel { get; set; }
+    public int? MaxEntries { get; set; }
     public IReadOnlyList<StorageEntryResult>? Entries { get; set; }
 }
 
