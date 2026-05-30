@@ -5,6 +5,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -81,6 +82,14 @@ builder.Services.AddSingleton<SystemService>();
 builder.Services.AddSingleton<SkillService>();
 builder.Services.AddSingleton<StorageService>();
 builder.Services.AddHealthChecks();
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor |
+        ForwardedHeaders.XForwardedHost |
+        ForwardedHeaders.XForwardedProto;
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Clear();
+});
 
 builder.Services
     .AddMcpServer()
@@ -88,6 +97,8 @@ builder.Services
     .WithToolsFromAssembly();
 
 var app = builder.Build();
+
+app.UseForwardedHeaders();
 
 if (authenticationEnabled)
 {
@@ -97,6 +108,61 @@ if (authenticationEnabled)
 app.UseAuthorization();
 
 app.MapHealthChecks("/health").AllowAnonymous();
+app.MapGet("/", () => Results.Redirect("/mcp")).AllowAnonymous();
+
+app.MapGet("/.well-known/oauth-authorization-server", (
+    IOptions<McpOAuthOptions> options) =>
+{
+    var issuer = options.Value.Issuer.TrimEnd('/');
+
+    return Results.Json(new
+    {
+        issuer,
+        authorization_endpoint = $"{issuer}/authorize",
+        token_endpoint = $"{issuer}/token",
+        registration_endpoint = $"{issuer}/register",
+        response_types_supported = new[] { "code" },
+        grant_types_supported = new[] { "authorization_code", "refresh_token" },
+        token_endpoint_auth_methods_supported = new[] { "none" },
+        code_challenge_methods_supported = new[] { "S256", "plain" },
+        scopes_supported = new[] { options.Value.Scope }
+    });
+}).AllowAnonymous();
+
+app.MapGet("/.well-known/openid-configuration", (
+    IOptions<McpOAuthOptions> options) =>
+{
+    var issuer = options.Value.Issuer.TrimEnd('/');
+
+    return Results.Json(new
+    {
+        issuer,
+        authorization_endpoint = $"{issuer}/authorize",
+        token_endpoint = $"{issuer}/token",
+        registration_endpoint = $"{issuer}/register",
+        response_types_supported = new[] { "code" },
+        grant_types_supported = new[] { "authorization_code", "refresh_token" },
+        token_endpoint_auth_methods_supported = new[] { "none" },
+        code_challenge_methods_supported = new[] { "S256", "plain" },
+        scopes_supported = new[] { options.Value.Scope }
+    });
+}).AllowAnonymous();
+
+app.MapGet("/.well-known/oauth-protected-resource", (
+    HttpContext context,
+    IOptions<McpOAuthOptions> options) =>
+{
+    var resource = $"{context.Request.Scheme}://{context.Request.Host}/mcp";
+
+    return Results.Json(new
+    {
+        resource,
+        authorization_servers = new[] { options.Value.Issuer.TrimEnd('/') },
+        bearer_methods_supported = new[] { "header" },
+        scopes_supported = new[] { options.Value.Scope },
+        resource_name = options.Value.ResourceName
+    });
+}).AllowAnonymous();
 
 app.MapGet("/.well-known/oauth-protected-resource/mcp", (
     HttpContext context,
