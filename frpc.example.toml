@@ -18,3 +18,10 @@ type = "tcp"
 localIP = "127.0.0.1"
 localPort = 5000
 remotePort = 7010
+
+[[proxies]]
+name = "hello_docker_auth"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 5001
+remotePort = 7011

@@ -12,3 +12,6 @@ run.bat
 storage/*
 !storage/test.txt
 !storage/.gitkeep
+
+# Ignore persisted auth credentials
+auth-data/
