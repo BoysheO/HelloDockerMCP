@@ -54,6 +54,12 @@ builder.Services.AddOptions<DockerOptions>()
         options => options.ResourceLimits.MaxCpus > 0,
         "Docker:ResourceLimits:MaxCpus must be greater than 0.")
     .ValidateOnStart();
+builder.Services.AddOptions<GitOptions>()
+    .Bind(builder.Configuration.GetSection("Git"))
+    .Validate(options => options.DefaultTimeoutSeconds > 0, "Git:DefaultTimeoutSeconds must be greater than 0.")
+    .Validate(options => options.MaxTimeoutSeconds >= options.DefaultTimeoutSeconds, "Git:MaxTimeoutSeconds must be greater than or equal to Git:DefaultTimeoutSeconds.")
+    .Validate(options => options.MaxOutputBytes > 0, "Git:MaxOutputBytes must be greater than 0.")
+    .ValidateOnStart();
 
 if (authenticationEnabled)
 {
@@ -81,6 +87,7 @@ builder.Services.AddSingleton<DockerImageService>();
 builder.Services.AddSingleton<SystemService>();
 builder.Services.AddSingleton<SkillService>();
 builder.Services.AddSingleton<StorageService>();
+builder.Services.AddSingleton<GitService>();
 builder.Services.AddHealthChecks();
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {

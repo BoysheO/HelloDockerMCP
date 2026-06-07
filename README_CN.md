@@ -386,9 +386,26 @@ GPT 可通过 MCP 工具对该目录执行：
 移动
 复制
 删除
+git clone
+git fetch
+git pull
+git status
+git branch list
+git checkout
 ```
 
 因此，该目录应被视为 GPT 可操作的工作区。
+
+Git 操作也被限制在同一个 storage 工作区内。仓库路径、克隆目标目录和可选私钥路径都会被解释为 `storage` 下的相对路径。
+
+访问 SSH 仓库时，如果没有传入 `privateKeyPath`，GitMCP 会使用 MCP 服务运行环境中的 OpenSSH 默认身份。在 Docker Compose 部署中，如果希望默认身份使用宿主机私钥，需要把宿主机 SSH 配置和密钥只读挂载到 MCP 容器：
+
+```yaml
+volumes:
+  - ~/.ssh:/root/.ssh:ro
+```
+
+GPT 也可以通过 `privateKeyPath` 指定已经放在 `storage` 下的私钥文件。不要把生产环境唯一密钥放入 `storage`；建议使用任务级或可随时吊销的 deploy key。
 
 ## 13. 推荐使用方式
 

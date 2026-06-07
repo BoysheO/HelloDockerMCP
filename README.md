@@ -385,9 +385,26 @@ upload
 move
 copy
 delete
+git clone
+git fetch
+git pull
+git status
+git branch list
+git checkout
 ```
 
 Treat this directory as a workspace that GPT is allowed to operate.
+
+Git operations are restricted to this same storage workspace. Repository paths, clone destinations, and optional private key paths are always interpreted as paths under `storage`.
+
+For SSH repositories, GitMCP uses the MCP service runtime's default OpenSSH identity when no `privateKeyPath` is provided. In Docker Compose deployments, mount host SSH config and keys into the MCP container if you want that default identity to use the host private keys:
+
+```yaml
+volumes:
+  - ~/.ssh:/root/.ssh:ro
+```
+
+GPT may also use a private key file placed under `storage` by passing that file as `privateKeyPath`. Do not place production-only secrets in `storage`; use task-scoped or disposable deploy keys when possible.
 
 ## 13. Recommended Usage
 

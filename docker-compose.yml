@@ -35,6 +35,8 @@ services:
       - ./storage:/storage
       - ./HelloDockerMcp/Skill.md:/skill/Skill.md
       - ./logs:/src/logs
+      # Optional: expose host OpenSSH defaults to GitMCP for SSH repository access.
+      # - ~/.ssh:/root/.ssh:ro
     command: sh -c "dotnet restore && dotnet run --no-restore --urls http://*:5000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]

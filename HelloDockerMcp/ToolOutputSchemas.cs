@@ -363,3 +363,29 @@ public sealed class SkillReadResult : ToolResult
     public string? Path { get; set; }
     public string? Content { get; set; }
 }
+
+public sealed class GitInfoResult : ToolResult
+{
+    public bool? GitAvailable { get; set; }
+    public string? GitVersion { get; set; }
+    public string? StorageRootPath { get; set; }
+    public int? DefaultTimeoutSeconds { get; set; }
+    public int? MaxTimeoutSeconds { get; set; }
+    public int? MaxOutputBytes { get; set; }
+    public object? Ssh { get; set; }
+}
+
+public sealed class GitCommandResult : ToolResult
+{
+    public string? RepositoryPath { get; set; }
+    public string? Branch { get; set; }
+    public string? Remote { get; set; }
+    public int? ExitCode { get; set; }
+    public long? DurationMs { get; set; }
+    public bool? TimedOut { get; set; }
+    public string? Stdout { get; set; }
+    public string? Stderr { get; set; }
+    public bool? Truncated { get; set; }
+    public bool? StdoutTruncated { get; set; }
+    public bool? StderrTruncated { get; set; }
+}
