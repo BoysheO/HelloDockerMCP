@@ -19,7 +19,7 @@ public sealed class GitTools
     }
 
     [McpServerTool(UseStructuredContent = true, OutputSchemaType = typeof(GitCommandResult))]
-    [Description("[One-shot Git API] Clone a Git repository into the configured storage directory. destinationPath is relative to storage and must not already contain files. SSH uses the service runtime default identity unless privateKeyPath points to a private key file inside storage.")]
+    [Description("[One-shot Git API] Clone a Git repository into the configured storage directory. destinationPath is relative to storage and must not already contain files. SSH uses privateKeyPath inside storage when provided. HTTPS can use httpUsername plus httpPasswordSecretKey from the Secret service.")]
     public async Task<object> CloneGitRepository(
         [Description("Git repository URL, for example https://github.com/org/repo.git or git@github.com:org/repo.git.")]
         string? repositoryUrl = null,
@@ -36,14 +36,20 @@ public sealed class GitTools
         [Description("Optional private key file path inside storage. When omitted, OpenSSH uses the service runtime default identity.")]
         string? privateKeyPath = null,
 
+        [Description("Optional HTTPS username for Git authentication. Requires httpPasswordSecretKey.")]
+        string? httpUsername = null,
+
+        [Description("Optional Secret service key containing the HTTPS password or token. Requires httpUsername.")]
+        string? httpPasswordSecretKey = null,
+
         [Description("Command timeout in seconds. Uses Git defaults when omitted or 0.")]
         int timeoutSeconds = 0)
     {
-        return await _git.CloneAsync(repositoryUrl, destinationPath, branch, depth, privateKeyPath, timeoutSeconds);
+        return await _git.CloneAsync(repositoryUrl, destinationPath, branch, depth, privateKeyPath, httpUsername, httpPasswordSecretKey, timeoutSeconds);
     }
 
     [McpServerTool(UseStructuredContent = true, OutputSchemaType = typeof(GitCommandResult))]
-    [Description("[Atomic Git API] Pull updates in an existing Git repository under storage. SSH uses the service runtime default identity unless privateKeyPath points to a private key file inside storage.")]
+    [Description("[Atomic Git API] Pull updates in an existing Git repository under storage. SSH uses privateKeyPath inside storage when provided. HTTPS can use httpUsername plus httpPasswordSecretKey from the Secret service.")]
     public async Task<object> PullGitRepository(
         [Description("Repository directory path inside storage.")]
         string? repositoryPath = null,
@@ -57,14 +63,20 @@ public sealed class GitTools
         [Description("Optional private key file path inside storage. When omitted, OpenSSH uses the service runtime default identity.")]
         string? privateKeyPath = null,
 
+        [Description("Optional HTTPS username for Git authentication. Requires httpPasswordSecretKey.")]
+        string? httpUsername = null,
+
+        [Description("Optional Secret service key containing the HTTPS password or token. Requires httpUsername.")]
+        string? httpPasswordSecretKey = null,
+
         [Description("Command timeout in seconds. Uses Git defaults when omitted or 0.")]
         int timeoutSeconds = 0)
     {
-        return await _git.PullAsync(repositoryPath, remote, branch, privateKeyPath, timeoutSeconds);
+        return await _git.PullAsync(repositoryPath, remote, branch, privateKeyPath, httpUsername, httpPasswordSecretKey, timeoutSeconds);
     }
 
     [McpServerTool(UseStructuredContent = true, OutputSchemaType = typeof(GitCommandResult))]
-    [Description("[Atomic Git API] Fetch updates in an existing Git repository under storage. SSH uses the service runtime default identity unless privateKeyPath points to a private key file inside storage.")]
+    [Description("[Atomic Git API] Fetch updates in an existing Git repository under storage. SSH uses privateKeyPath inside storage when provided. HTTPS can use httpUsername plus httpPasswordSecretKey from the Secret service.")]
     public async Task<object> FetchGitRepository(
         [Description("Repository directory path inside storage.")]
         string? repositoryPath = null,
@@ -75,10 +87,16 @@ public sealed class GitTools
         [Description("Optional private key file path inside storage. When omitted, OpenSSH uses the service runtime default identity.")]
         string? privateKeyPath = null,
 
+        [Description("Optional HTTPS username for Git authentication. Requires httpPasswordSecretKey.")]
+        string? httpUsername = null,
+
+        [Description("Optional Secret service key containing the HTTPS password or token. Requires httpUsername.")]
+        string? httpPasswordSecretKey = null,
+
         [Description("Command timeout in seconds. Uses Git defaults when omitted or 0.")]
         int timeoutSeconds = 0)
     {
-        return await _git.FetchAsync(repositoryPath, remote, privateKeyPath, timeoutSeconds);
+        return await _git.FetchAsync(repositoryPath, remote, privateKeyPath, httpUsername, httpPasswordSecretKey, timeoutSeconds);
     }
 
     [McpServerTool(UseStructuredContent = true, OutputSchemaType = typeof(GitCommandResult))]

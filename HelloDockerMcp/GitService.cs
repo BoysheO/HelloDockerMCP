@@ -10,11 +10,13 @@ public sealed class GitService
     private const int DefaultMaxOutputBytes = 128 * 1024;
 
     private readonly StorageService _storage;
+    private readonly SecretService _secrets;
     private readonly GitOptions _options;
 
-    public GitService(StorageService storage, IOptions<GitOptions> options)
+    public GitService(StorageService storage, SecretService secrets, IOptions<GitOptions> options)
     {
         _storage = storage;
+        _secrets = secrets;
         _options = options.Value;
     }
 
@@ -22,29 +24,39 @@ public sealed class GitService
     {
         try
         {
-            var version = await RunGitAsync(null, new[] { "--version" }, null, null);
+            var version = await RunGitAsync(null, new[] { "--version" }, GitCommandContext.Empty, null);
+            var sshVersion = await RunProcessAsync("ssh", new[] { "-V" }, null);
+            var gitAvailable = version.ExitCode == 0;
+            var sshAvailable = sshVersion.ExitCode == 0;
             return new
             {
-                ok = version.ExitCode == 0,
-                gitAvailable = version.ExitCode == 0,
-                gitVersion = version.ExitCode == 0 ? version.Stdout.Trim() : null,
+                ok = gitAvailable && sshAvailable,
+                gitAvailable,
+                gitVersion = gitAvailable ? version.Stdout.Trim() : null,
+                sshAvailable,
+                sshVersion = sshAvailable ? (string.IsNullOrWhiteSpace(sshVersion.Stdout) ? sshVersion.Stderr : sshVersion.Stdout).Trim() : null,
                 storageRootPath = _storage.RootPath,
                 defaultTimeoutSeconds = DefaultTimeoutSeconds,
                 maxTimeoutSeconds = MaxTimeoutSeconds,
                 maxOutputBytes = MaxOutputBytes,
+                operatingSystem = RuntimeInformation.OSDescription,
+                sshWrapperMode = "sh",
                 ssh = new
                 {
-                    defaultIdentity = "OpenSSH default identity from the service runtime, such as /root/.ssh keys, ssh config, or SSH agent.",
+                    defaultIdentity = "OpenSSH default identity from the Linux container service account, such as /root/.ssh keys, ssh config, or SSH agent.",
+                    wrapperMode = "sh",
                     storagePrivateKeySupported = true,
                     knownHostsPath = ToStoragePath(KnownHostsPath)
                 },
-                errorCode = version.ExitCode == 0 ? null : "GIT_NOT_AVAILABLE",
-                message = version.ExitCode == 0
-                    ? "Git is available. All Git repository paths are restricted to storage."
-                    : "The git executable is not available to the MCP service runtime.",
-                hint = version.ExitCode == 0
+                errorCode = gitAvailable ? sshAvailable ? null : "SSH_NOT_AVAILABLE" : "GIT_NOT_AVAILABLE",
+                message = gitAvailable && sshAvailable
+                    ? "Git and OpenSSH are available. All Git repository paths are restricted to storage."
+                    : gitAvailable
+                        ? "The ssh executable is not available to the MCP service runtime."
+                        : "The git executable is not available to the MCP service runtime.",
+                hint = gitAvailable && sshAvailable
                     ? null
-                    : "Install git in the service image or use an image that already contains git."
+                    : "Install git and openssh-client in the service image or use an image that already contains both."
             };
         }
         catch (Exception ex)
@@ -59,6 +71,8 @@ public sealed class GitService
         string? branch,
         int depth,
         string? privateKeyPath,
+        string? httpUsername,
+        string? httpPasswordSecretKey,
         int timeoutSeconds)
     {
         try
@@ -101,8 +115,8 @@ public sealed class GitService
             args.Add(repositoryUrl.Trim());
             args.Add(destination);
 
-            using var ssh = PrepareSsh(privateKeyPath);
-            var result = await RunGitAsync(null, args, ssh.Command, timeoutSeconds);
+            using var commandContext = PrepareGitCommandContext(privateKeyPath, httpUsername, httpPasswordSecretKey);
+            var result = await RunGitAsync(null, args, commandContext, timeoutSeconds);
             return ToGitResult(result, repositoryPath: ToStoragePath(destination), branch: branch, remote: null);
         }
         catch (Exception ex)
@@ -111,7 +125,7 @@ public sealed class GitService
         }
     }
 
-    public async Task<object> PullAsync(string? repositoryPath, string? remote, string? branch, string? privateKeyPath, int timeoutSeconds)
+    public async Task<object> PullAsync(string? repositoryPath, string? remote, string? branch, string? privateKeyPath, string? httpUsername, string? httpPasswordSecretKey, int timeoutSeconds)
     {
         try
         {
@@ -126,8 +140,8 @@ public sealed class GitService
                 }
             }
 
-            using var ssh = PrepareSsh(privateKeyPath);
-            var result = await RunGitAsync(repository, args, ssh.Command, timeoutSeconds);
+            using var commandContext = PrepareGitCommandContext(privateKeyPath, httpUsername, httpPasswordSecretKey);
+            var result = await RunGitAsync(repository, args, commandContext, timeoutSeconds);
             return ToGitResult(result, ToStoragePath(repository), branch, remote);
         }
         catch (Exception ex)
@@ -136,7 +150,7 @@ public sealed class GitService
         }
     }
 
-    public async Task<object> FetchAsync(string? repositoryPath, string? remote, string? privateKeyPath, int timeoutSeconds)
+    public async Task<object> FetchAsync(string? repositoryPath, string? remote, string? privateKeyPath, string? httpUsername, string? httpPasswordSecretKey, int timeoutSeconds)
     {
         try
         {
@@ -147,8 +161,8 @@ public sealed class GitService
                 args.Add(remote.Trim());
             }
 
-            using var ssh = PrepareSsh(privateKeyPath);
-            var result = await RunGitAsync(repository, args, ssh.Command, timeoutSeconds);
+            using var commandContext = PrepareGitCommandContext(privateKeyPath, httpUsername, httpPasswordSecretKey);
+            var result = await RunGitAsync(repository, args, commandContext, timeoutSeconds);
             return ToGitResult(result, ToStoragePath(repository), branch: null, remote);
         }
         catch (Exception ex)
@@ -162,7 +176,7 @@ public sealed class GitService
         try
         {
             var repository = await ResolveRepositoryAsync(repositoryPath, timeoutSeconds);
-            var result = await RunGitAsync(repository, new[] { "status", "--short", "--branch" }, null, timeoutSeconds);
+            var result = await RunGitAsync(repository, new[] { "status", "--short", "--branch" }, GitCommandContext.Empty, timeoutSeconds);
             return ToGitResult(result, ToStoragePath(repository), branch: null, remote: null);
         }
         catch (Exception ex)
@@ -179,7 +193,7 @@ public sealed class GitService
             var args = includeRemote
                 ? new[] { "branch", "--all", "--verbose", "--no-abbrev" }
                 : new[] { "branch", "--verbose", "--no-abbrev" };
-            var result = await RunGitAsync(repository, args, null, timeoutSeconds);
+            var result = await RunGitAsync(repository, args, GitCommandContext.Empty, timeoutSeconds);
             return ToGitResult(result, ToStoragePath(repository), branch: null, remote: null);
         }
         catch (Exception ex)
@@ -207,8 +221,8 @@ public sealed class GitService
                 ? new[] { "checkout", "-b", branch.Trim() }
                 : new[] { "checkout", branch.Trim() };
 
-            using var ssh = PrepareSsh(privateKeyPath);
-            var result = await RunGitAsync(repository, args, ssh.Command, timeoutSeconds);
+            using var commandContext = PrepareGitCommandContext(privateKeyPath, null, null);
+            var result = await RunGitAsync(repository, args, commandContext, timeoutSeconds);
             return ToGitResult(result, ToStoragePath(repository), branch, remote: null);
         }
         catch (Exception ex)
@@ -225,7 +239,7 @@ public sealed class GitService
             throw new GitToolException("REPOSITORY_NOT_FOUND", $"Repository directory not found: {ToStoragePath(repository)}.");
         }
 
-        var probe = await RunGitAsync(repository, new[] { "rev-parse", "--is-inside-work-tree" }, null, timeoutSeconds);
+        var probe = await RunGitAsync(repository, new[] { "rev-parse", "--is-inside-work-tree" }, GitCommandContext.Empty, timeoutSeconds);
         if (probe.ExitCode != 0 || !string.Equals(probe.Stdout.Trim(), "true", StringComparison.OrdinalIgnoreCase))
         {
             throw new GitToolException("REPOSITORY_NOT_FOUND", $"Path is not a Git repository: {ToStoragePath(repository)}.");
@@ -234,9 +248,17 @@ public sealed class GitService
         return repository;
     }
 
+    private GitCommandContext PrepareGitCommandContext(string? privateKeyPath, string? httpUsername, string? httpPasswordSecretKey)
+    {
+        var ssh = PrepareSsh(privateKeyPath);
+        var askPass = PrepareAskPass(httpUsername, httpPasswordSecretKey);
+        return new GitCommandContext(ssh.WrapperPath, askPass.WrapperPath, askPass.SecretValue, ssh, askPass);
+    }
+
     private SshCommandLease PrepareSsh(string? privateKeyPath)
     {
         Directory.CreateDirectory(GitStatePath);
+        var wrapperPath = Path.Combine(GitStatePath, $"ssh_{Guid.NewGuid():N}.sh");
         var args = new List<string>
         {
             "ssh",
@@ -271,13 +293,14 @@ public sealed class GitService
             args.Add("IdentitiesOnly=yes");
         }
 
-        return new SshCommandLease(string.Join(" ", args.Select(QuoteSshCommandArgument)), tempKeyPath);
+        WriteSshWrapper(wrapperPath, args);
+        return new SshCommandLease(wrapperPath, tempKeyPath);
     }
 
     private async Task<GitCommandResult> RunGitAsync(
         string? workingDirectory,
         IEnumerable<string> arguments,
-        string? gitSshCommand,
+        GitCommandContext commandContext,
         int? timeoutSeconds)
     {
         var timeout = TimeSpan.FromSeconds(NormalizeTimeout(timeoutSeconds));
@@ -302,9 +325,15 @@ public sealed class GitService
             startInfo.ArgumentList.Add(argument);
         }
 
-        if (!string.IsNullOrWhiteSpace(gitSshCommand))
+        if (!string.IsNullOrWhiteSpace(commandContext.SshWrapperPath))
         {
-            startInfo.Environment["GIT_SSH_COMMAND"] = gitSshCommand;
+            startInfo.Environment["GIT_SSH"] = commandContext.SshWrapperPath;
+        }
+
+        if (!string.IsNullOrWhiteSpace(commandContext.AskPassWrapperPath))
+        {
+            startInfo.Environment["GIT_ASKPASS"] = commandContext.AskPassWrapperPath;
+            startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
         }
 
         var startedAt = Stopwatch.GetTimestamp();
@@ -325,8 +354,8 @@ public sealed class GitService
                 await Task.WhenAll(ObserveOutputAsync(stdoutTask), ObserveOutputAsync(stderrTask));
                 return new GitCommandResult(
                     ExitCode: null,
-                    Stdout: stdoutTask.IsCompletedSuccessfully ? stdoutTask.Result.Text : string.Empty,
-                    Stderr: stderrTask.IsCompletedSuccessfully ? stderrTask.Result.Text : "Git command timed out.",
+                    Stdout: ScrubSecret(stdoutTask.IsCompletedSuccessfully ? stdoutTask.Result.Text : string.Empty, commandContext.SecretToScrub),
+                    Stderr: ScrubSecret(stderrTask.IsCompletedSuccessfully ? stderrTask.Result.Text : "Git command timed out.", commandContext.SecretToScrub),
                     StdoutTruncated: stdoutTask.IsCompletedSuccessfully && stdoutTask.Result.Truncated,
                     StderrTruncated: true,
                     TimedOut: true,
@@ -337,8 +366,8 @@ public sealed class GitService
             var stderr = await stderrTask;
             return new GitCommandResult(
                 process.ExitCode,
-                stdout.Text,
-                stderr.Text,
+                ScrubSecret(stdout.Text, commandContext.SecretToScrub),
+                ScrubSecret(stderr.Text, commandContext.SecretToScrub),
                 stdout.Truncated,
                 stderr.Truncated,
                 TimedOut: false,
@@ -348,6 +377,70 @@ public sealed class GitService
         {
             throw new GitToolException("GIT_NOT_AVAILABLE", $"The git executable is not available: {ex.Message}");
         }
+    }
+
+    private async Task<GitCommandResult> RunProcessAsync(string fileName, IEnumerable<string> arguments, int? timeoutSeconds)
+    {
+        var timeout = TimeSpan.FromSeconds(NormalizeTimeout(timeoutSeconds));
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = fileName,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
+        };
+
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        var startedAt = Stopwatch.GetTimestamp();
+        try
+        {
+            using var process = Process.Start(startInfo);
+            if (process is null)
+            {
+                return UnavailableProcessResult(fileName, startedAt);
+            }
+
+            using var cts = new CancellationTokenSource(timeout);
+            var stdoutTask = ReadLimitedAsync(process.StandardOutput, MaxOutputBytes, cts.Token);
+            var stderrTask = ReadLimitedAsync(process.StandardError, MaxOutputBytes, cts.Token);
+            try
+            {
+                await process.WaitForExitAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                TryKill(process);
+                await Task.WhenAll(ObserveOutputAsync(stdoutTask), ObserveOutputAsync(stderrTask));
+                return new GitCommandResult(null, string.Empty, $"{fileName} command timed out.", false, true, true, (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
+            }
+
+            var stdout = await stdoutTask;
+            var stderr = await stderrTask;
+            return new GitCommandResult(process.ExitCode, stdout.Text, stderr.Text, stdout.Truncated, stderr.Truncated, false, (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            return UnavailableProcessResult(fileName, startedAt);
+        }
+    }
+
+    private static GitCommandResult UnavailableProcessResult(string fileName, long startedAt)
+    {
+        return new GitCommandResult(
+            ExitCode: 127,
+            Stdout: string.Empty,
+            Stderr: $"{fileName} executable is not available.",
+            StdoutTruncated: false,
+            StderrTruncated: false,
+            TimedOut: false,
+            DurationMs: (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
     }
 
     private int NormalizeTimeout(int? timeoutSeconds)
@@ -382,9 +475,64 @@ public sealed class GitService
         return "/" + path.Trim().Replace('\\', '/').TrimStart('/');
     }
 
-    private static string QuoteSshCommandArgument(string value)
+    private AskPassLease PrepareAskPass(string? httpUsername, string? httpPasswordSecretKey)
     {
-        return "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+        if (string.IsNullOrWhiteSpace(httpPasswordSecretKey))
+        {
+            if (!string.IsNullOrWhiteSpace(httpUsername))
+            {
+                throw new GitToolException("MISSING_REQUIRED_ARGUMENT", "httpPasswordSecretKey is required when httpUsername is provided.");
+            }
+
+            return AskPassLease.Empty;
+        }
+
+        if (string.IsNullOrWhiteSpace(httpUsername))
+        {
+            throw new GitToolException("MISSING_REQUIRED_ARGUMENT", "httpUsername is required when httpPasswordSecretKey is provided.");
+        }
+
+        var secretValue = _secrets.GetValue(httpPasswordSecretKey);
+        Directory.CreateDirectory(GitStatePath);
+        var usernamePath = Path.Combine(GitStatePath, $"askpass_user_{Guid.NewGuid():N}");
+        var passwordPath = Path.Combine(GitStatePath, $"askpass_pass_{Guid.NewGuid():N}");
+        var wrapperPath = Path.Combine(GitStatePath, $"askpass_{Guid.NewGuid():N}.sh");
+        File.WriteAllText(usernamePath, httpUsername, new UTF8Encoding(false));
+        File.WriteAllText(passwordPath, secretValue, new UTF8Encoding(false));
+        TrySetUserOnlyReadWrite(usernamePath);
+        TrySetUserOnlyReadWrite(passwordPath);
+        var script = $$"""
+#!/bin/sh
+case "$1" in
+  *Username*) cat {{QuoteShArgument(usernamePath)}} ;;
+  *Password*) cat {{QuoteShArgument(passwordPath)}} ;;
+  *) cat {{QuoteShArgument(passwordPath)}} ;;
+esac
+""";
+        File.WriteAllText(wrapperPath, script, new UTF8Encoding(false));
+        TrySetUserOnlyExecute(wrapperPath);
+        return new AskPassLease(wrapperPath, usernamePath, passwordPath, secretValue);
+    }
+
+    private static void WriteSshWrapper(string wrapperPath, IReadOnlyList<string> args)
+    {
+        var script = new StringBuilder();
+        script.AppendLine("#!/bin/sh");
+        script.Append("exec ssh");
+        foreach (var arg in args.Skip(1))
+        {
+            script.Append(' ');
+            script.Append(QuoteShArgument(arg));
+        }
+
+        script.AppendLine(" \"$@\"");
+        File.WriteAllText(wrapperPath, script.ToString(), new UTF8Encoding(false));
+        TrySetUserOnlyExecute(wrapperPath);
+    }
+
+    private static string QuoteShArgument(string value)
+    {
+        return "'" + value.Replace("'", "'\"'\"'") + "'";
     }
 
     private static async Task<LimitedTextResult> ReadLimitedAsync(StreamReader reader, int maxChars, CancellationToken cancellationToken)
@@ -443,7 +591,7 @@ public sealed class GitService
 
     private static void TrySetUserOnlyReadWrite(string path)
     {
-        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        if (!OperatingSystem.IsLinux())
         {
             return;
         }
@@ -455,6 +603,27 @@ public sealed class GitService
         catch
         {
         }
+    }
+
+    private static void TrySetUserOnlyExecute(string path)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        try
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+        catch
+        {
+        }
+    }
+
+    private static string ScrubSecret(string text, string? secret)
+    {
+        return string.IsNullOrEmpty(secret) ? text : text.Replace(secret, "[REDACTED]", StringComparison.Ordinal);
     }
 
     private static object ToGitResult(GitCommandResult result, string? repositoryPath, string? branch, string? remote)
@@ -491,6 +660,11 @@ public sealed class GitService
             return Error(gitException.ErrorCode, gitException.Message, gitException.Hint);
         }
 
+        if (ex is SecretToolException secretException)
+        {
+            return Error(secretException.ErrorCode, secretException.Message, "Use list_secret_keys to inspect available secret keys, or add the secret in /secrets.");
+        }
+
         return Error("GIT_COMMAND_FAILED", ex.Message, "Check the repository path, remote URL, branch, credentials, and network access.");
     }
 
@@ -516,32 +690,112 @@ public sealed class GitService
         bool TimedOut,
         long DurationMs);
 
+    private sealed class GitCommandContext : IDisposable
+    {
+        public static readonly GitCommandContext Empty = new(null, null, null, null, null);
+
+        public GitCommandContext(string? sshWrapperPath, string? askPassWrapperPath, string? secretToScrub, SshCommandLease? ssh, AskPassLease? askPass)
+        {
+            SshWrapperPath = sshWrapperPath;
+            AskPassWrapperPath = askPassWrapperPath;
+            SecretToScrub = secretToScrub;
+            Ssh = ssh;
+            AskPass = askPass;
+        }
+
+        public string? SshWrapperPath { get; }
+
+        public string? AskPassWrapperPath { get; }
+
+        public string? SecretToScrub { get; }
+
+        private SshCommandLease? Ssh { get; }
+
+        private AskPassLease? AskPass { get; }
+
+        public void Dispose()
+        {
+            Ssh?.Dispose();
+            AskPass?.Dispose();
+        }
+    }
+
+    private sealed class AskPassLease : IDisposable
+    {
+        public static readonly AskPassLease Empty = new(null, null, null, null);
+
+        public AskPassLease(string? wrapperPath, string? usernamePath, string? passwordPath, string? secretValue)
+        {
+            WrapperPath = wrapperPath;
+            UsernamePath = usernamePath;
+            PasswordPath = passwordPath;
+            SecretValue = secretValue;
+        }
+
+        public string? WrapperPath { get; }
+
+        public string? SecretValue { get; }
+
+        private string? UsernamePath { get; }
+
+        private string? PasswordPath { get; }
+
+        public void Dispose()
+        {
+            DeleteIfPresent(WrapperPath);
+            DeleteIfPresent(UsernamePath);
+            DeleteIfPresent(PasswordPath);
+        }
+    }
+
     private sealed class SshCommandLease : IDisposable
     {
-        public SshCommandLease(string command, string? temporaryPrivateKeyPath)
+        public SshCommandLease(string wrapperPath, string? temporaryPrivateKeyPath)
         {
-            Command = command;
+            WrapperPath = wrapperPath;
             TemporaryPrivateKeyPath = temporaryPrivateKeyPath;
         }
 
-        public string Command { get; }
+        public string WrapperPath { get; }
 
         private string? TemporaryPrivateKeyPath { get; }
 
         public void Dispose()
         {
-            if (string.IsNullOrWhiteSpace(TemporaryPrivateKeyPath))
+            if (!string.IsNullOrWhiteSpace(TemporaryPrivateKeyPath))
             {
-                return;
+                try
+                {
+                    File.Delete(TemporaryPrivateKeyPath);
+                }
+                catch
+                {
+                }
             }
 
             try
             {
-                File.Delete(TemporaryPrivateKeyPath);
+                File.Delete(WrapperPath);
             }
             catch
             {
             }
+        }
+    }
+
+    private static void DeleteIfPresent(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        try
+        {
+            File.Delete(path);
+        }
+        catch
+        {
         }
     }
 }

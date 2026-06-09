@@ -129,6 +129,8 @@ docker pull docker:27-dind
 docker pull mcr.microsoft.com/dotnet/sdk:10.0
 ```
 
+MCP 服务镜像会从 `HelloDockerMcp/Dockerfile` 在本地构建，镜像中包含 GitMCP 所需的 `git` 和 `openssh-client`。
+
 GPT 通过 MCP 使用的业务镜像，需要在 Docker-in-Docker 环境中可用。服务启动后，可以在 `hello-docker-dind` 内提前拉取常用镜像：
 
 ```bash
@@ -192,6 +194,8 @@ HELLO_DOCKER_OAUTH_ISSUER=https://hellodockerauth.example.com
 HELLO_DOCKER_OAUTH_SIGNING_KEY=please-change-this-key-at-least-32-bytes
 HELLO_DOCKER_OAUTH_SCOPE=mcp
 HELLO_DOCKER_OAUTH_RESOURCE_NAME=Hello Docker MCP
+HELLO_DOCKER_SECRET_ADMIN_USERNAME=admin
+HELLO_DOCKER_SECRET_ADMIN_PASSWORD=change-this-secret-admin-password
 
 HELLO_DOCKER_OAUTH_ACCESS_TOKEN_LIFETIME_SECONDS=3600
 HELLO_DOCKER_OAUTH_AUTHORIZATION_CODE_LIFETIME_SECONDS=300
@@ -210,6 +214,7 @@ HELLO_DOCKER_PASSKEYS_REQUIRE_USER_VERIFICATION=false
 ```env
 HELLO_DOCKER_OAUTH_SIGNING_KEY
 HELLO_DOCKER_OAUTH_PASSWORD
+HELLO_DOCKER_SECRET_ADMIN_PASSWORD
 ```
 
 其中：
@@ -220,6 +225,8 @@ HELLO_DOCKER_OAUTH_PASSWORD
 | `HELLO_DOCKER_OAUTH_SIGNING_KEY` | OAuth Token 签名密钥 |
 | `HELLO_DOCKER_OAUTH_SCOPE` | OAuth Scope，默认 `mcp` |
 | `HELLO_DOCKER_OAUTH_RESOURCE_NAME` | MCP 资源名称 |
+| `HELLO_DOCKER_SECRET_ADMIN_USERNAME` | `/secrets` 密文管理页面用户名 |
+| `HELLO_DOCKER_SECRET_ADMIN_PASSWORD` | `/secrets` 密文管理页面密码，同时用于派生落盘加密密钥 |
 | `HELLO_DOCKER_OAUTH_USERNAME` | OAuth 登录用户名 |
 | `HELLO_DOCKER_OAUTH_PASSWORD` | OAuth 登录密码 |
 | `HELLO_DOCKER_PASSKEYS_ENABLED` | 是否启用 passkey 注册和登录 |
@@ -275,10 +282,10 @@ frpc:
 在项目根目录执行：
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
-首次启动时会拉取镜像并启动以下服务：
+首次启动时会构建 MCP 服务镜像、拉取所需基础镜像，并启动以下服务：
 
 ```text
 hello-docker-mcp
@@ -340,7 +347,7 @@ EOF
 # 4. 如不使用 frpc，或不知道 frpc 是什么，编辑 docker-compose.yml 注释 frpc 服务
 
 # 5. 启动服务
-docker compose up -d
+docker compose up -d --build
 
 # 6. 可选：服务启动后，在 DinD 内提前拉取常用镜像
 docker exec hello-docker-dind docker pull hello-world
@@ -398,14 +405,24 @@ git checkout
 
 Git 操作也被限制在同一个 storage 工作区内。仓库路径、克隆目标目录和可选私钥路径都会被解释为 `storage` 下的相对路径。
 
-访问 SSH 仓库时，如果没有传入 `privateKeyPath`，GitMCP 会使用 MCP 服务运行环境中的 OpenSSH 默认身份。在 Docker Compose 部署中，如果希望默认身份使用宿主机私钥，需要把宿主机 SSH 配置和密钥只读挂载到 MCP 容器：
+GitMCP 在 Linux MCP 容器中运行。访问 SSH 仓库时，如果私钥存放在 `storage` 下，传入 `privateKeyPath` 即可。GitMCP 会把该私钥复制为临时 `0600` 文件后再交给 OpenSSH，因此原始 Storage 私钥权限较宽的问题会在服务内部处理。
+
+访问 HTTPS 仓库时，先由人工在 `/secrets` 页面添加 token/password。GPT 可以通过 `list_secret_keys` 获取可用 key 名称，然后在 Git clone/fetch/pull 工具中传入 `httpUsername` 和 `httpPasswordSecretKey`。密文值会加密落盘，并且不会通过 MCP 工具返回。
+
+如果 SSH 操作没有传入 `privateKeyPath`，OpenSSH 会使用容器默认身份：
+
+```text
+Docker 部署：容器身份，通常是 /root/.ssh
+```
+
+在 Docker Compose 部署中，如果希望默认身份使用挂载的私钥，需要把 SSH 配置和密钥只读挂载到 MCP 容器：
 
 ```yaml
 volumes:
-  - ~/.ssh:/root/.ssh:ro
+  - ${HOME}/.ssh:/root/.ssh:ro
 ```
 
-GPT 也可以通过 `privateKeyPath` 指定已经放在 `storage` 下的私钥文件。不要把生产环境唯一密钥放入 `storage`；建议使用任务级或可随时吊销的 deploy key。
+GPT 也可以通过 `privateKeyPath` 指定已经放在 `storage` 下的私钥文件。GitMCP 会在 Linux 容器内为当前命令创建带限制权限的临时私钥副本。不要把生产环境唯一密钥放入 `storage`；建议使用任务级或可随时吊销的 deploy key。
 
 ## 13. 推荐使用方式
 

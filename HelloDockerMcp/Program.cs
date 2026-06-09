@@ -60,6 +60,13 @@ builder.Services.AddOptions<GitOptions>()
     .Validate(options => options.MaxTimeoutSeconds >= options.DefaultTimeoutSeconds, "Git:MaxTimeoutSeconds must be greater than or equal to Git:DefaultTimeoutSeconds.")
     .Validate(options => options.MaxOutputBytes > 0, "Git:MaxOutputBytes must be greater than 0.")
     .ValidateOnStart();
+builder.Services.AddOptions<SecretOptions>()
+    .Bind(builder.Configuration.GetSection("Secret"))
+    .Validate(options => !string.IsNullOrWhiteSpace(options.AdminUsername), "Secret:AdminUsername is required.")
+    .Validate(options => !string.IsNullOrWhiteSpace(options.AdminPassword), "Secret:AdminPassword is required.")
+    .Validate(options => options.AdminPassword.Length >= 12, "Secret:AdminPassword must be at least 12 characters.")
+    .Validate(options => !string.IsNullOrWhiteSpace(options.StorePath), "Secret:StorePath is required.")
+    .ValidateOnStart();
 
 if (authenticationEnabled)
 {
@@ -87,6 +94,7 @@ builder.Services.AddSingleton<DockerImageService>();
 builder.Services.AddSingleton<SystemService>();
 builder.Services.AddSingleton<SkillService>();
 builder.Services.AddSingleton<StorageService>();
+builder.Services.AddSingleton<SecretService>();
 builder.Services.AddSingleton<GitService>();
 builder.Services.AddHealthChecks();
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
@@ -116,6 +124,29 @@ app.UseAuthorization();
 
 app.MapHealthChecks("/health").AllowAnonymous();
 app.MapGet("/", () => Results.Redirect("/mcp")).AllowAnonymous();
+app.MapGet("/secrets", (HttpContext context, SecretService secrets) =>
+{
+    return secrets.RenderPage(context);
+}).AllowAnonymous();
+app.MapPost("/secrets/login", async (HttpContext context, SecretService secrets) =>
+{
+    var form = await context.Request.ReadFormAsync();
+    return secrets.Login(context, form);
+}).AllowAnonymous();
+app.MapPost("/secrets/logout", (HttpContext context, SecretService secrets) =>
+{
+    return secrets.Logout(context);
+}).AllowAnonymous();
+app.MapPost("/secrets/set", async (HttpContext context, SecretService secrets) =>
+{
+    var form = await context.Request.ReadFormAsync();
+    return secrets.SetFromForm(context, form);
+}).AllowAnonymous();
+app.MapPost("/secrets/delete", async (HttpContext context, SecretService secrets) =>
+{
+    var form = await context.Request.ReadFormAsync();
+    return secrets.DeleteFromForm(context, form);
+}).AllowAnonymous();
 
 app.MapGet("/.well-known/oauth-authorization-server", (
     IOptions<McpOAuthOptions> options) =>

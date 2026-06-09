@@ -552,7 +552,7 @@ public sealed class StorageService
 
     private static void TryChmod777(string path)
     {
-        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        if (!OperatingSystem.IsLinux())
         {
             return;
         }
@@ -574,7 +574,7 @@ public sealed class StorageService
 
     private static string? GetUnixMode(string path)
     {
-        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        if (!OperatingSystem.IsLinux())
         {
             return null;
         }
@@ -667,6 +667,7 @@ public sealed class StorageService
             hint = "Use a relative path inside the configured storage directory."
         };
     }
+
 }
 
 public sealed class StorageToolException : Exception

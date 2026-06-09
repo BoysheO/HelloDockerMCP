@@ -368,10 +368,14 @@ public sealed class GitInfoResult : ToolResult
 {
     public bool? GitAvailable { get; set; }
     public string? GitVersion { get; set; }
+    public bool? SshAvailable { get; set; }
+    public string? SshVersion { get; set; }
     public string? StorageRootPath { get; set; }
     public int? DefaultTimeoutSeconds { get; set; }
     public int? MaxTimeoutSeconds { get; set; }
     public int? MaxOutputBytes { get; set; }
+    public string? OperatingSystem { get; set; }
+    public string? SshWrapperMode { get; set; }
     public object? Ssh { get; set; }
 }
 
@@ -388,4 +392,17 @@ public sealed class GitCommandResult : ToolResult
     public bool? Truncated { get; set; }
     public bool? StdoutTruncated { get; set; }
     public bool? StderrTruncated { get; set; }
+}
+
+public sealed class SecretListResult : ToolResult
+{
+    public int? Count { get; set; }
+    public IReadOnlyList<SecretMetadataResult>? Secrets { get; set; }
+}
+
+public sealed class SecretMetadataResult
+{
+    public string? Key { get; set; }
+    public DateTimeOffset? CreatedAt { get; set; }
+    public DateTimeOffset? UpdatedAt { get; set; }
 }

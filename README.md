@@ -129,6 +129,8 @@ docker pull docker:27-dind
 docker pull mcr.microsoft.com/dotnet/sdk:10.0
 ```
 
+The MCP service image is built locally from `HelloDockerMcp/Dockerfile` so it includes both `git` and `openssh-client`, which are required by GitMCP.
+
 For images that GPT will use through the MCP Docker runtime, the images need to be available in the Docker-in-Docker environment. After the stack has started, you may pre-pull common images inside `hello-docker-dind`:
 
 ```bash
@@ -192,6 +194,8 @@ HELLO_DOCKER_OAUTH_ISSUER=https://hellodockerauth.example.com
 HELLO_DOCKER_OAUTH_SIGNING_KEY=please-change-this-key-at-least-32-bytes
 HELLO_DOCKER_OAUTH_SCOPE=mcp
 HELLO_DOCKER_OAUTH_RESOURCE_NAME=Hello Docker MCP
+HELLO_DOCKER_SECRET_ADMIN_USERNAME=admin
+HELLO_DOCKER_SECRET_ADMIN_PASSWORD=change-this-secret-admin-password
 
 HELLO_DOCKER_OAUTH_ACCESS_TOKEN_LIFETIME_SECONDS=3600
 HELLO_DOCKER_OAUTH_AUTHORIZATION_CODE_LIFETIME_SECONDS=300
@@ -210,6 +214,7 @@ For production deployment, change at least the following values:
 ```env
 HELLO_DOCKER_OAUTH_SIGNING_KEY
 HELLO_DOCKER_OAUTH_PASSWORD
+HELLO_DOCKER_SECRET_ADMIN_PASSWORD
 ```
 
 | Variable | Description |
@@ -218,6 +223,8 @@ HELLO_DOCKER_OAUTH_PASSWORD
 | `HELLO_DOCKER_OAUTH_SIGNING_KEY` | OAuth token signing key |
 | `HELLO_DOCKER_OAUTH_SCOPE` | OAuth scope, default: `mcp` |
 | `HELLO_DOCKER_OAUTH_RESOURCE_NAME` | MCP resource name |
+| `HELLO_DOCKER_SECRET_ADMIN_USERNAME` | Username for the `/secrets` admin page |
+| `HELLO_DOCKER_SECRET_ADMIN_PASSWORD` | Password for the `/secrets` admin page and encryption key derivation |
 | `HELLO_DOCKER_OAUTH_USERNAME` | OAuth login username |
 | `HELLO_DOCKER_OAUTH_PASSWORD` | OAuth login password |
 | `HELLO_DOCKER_PASSKEYS_ENABLED` | Enables passkey registration and sign-in |
@@ -273,10 +280,10 @@ frpc:
 Run the following command in the repository root:
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
-The first startup will pull images and start the following services:
+The first startup will build the MCP service image, pull required base images, and start the following services:
 
 ```text
 hello-docker-mcp
@@ -339,7 +346,7 @@ EOF
 # comment out the frpc service in docker-compose.yml
 
 # 5. Start services
-docker compose up -d
+docker compose up -d --build
 
 # 6. Optional: pre-pull common images inside DinD after startup
 docker exec hello-docker-dind docker pull hello-world
@@ -397,14 +404,24 @@ Treat this directory as a workspace that GPT is allowed to operate.
 
 Git operations are restricted to this same storage workspace. Repository paths, clone destinations, and optional private key paths are always interpreted as paths under `storage`.
 
-For SSH repositories, GitMCP uses the MCP service runtime's default OpenSSH identity when no `privateKeyPath` is provided. In Docker Compose deployments, mount host SSH config and keys into the MCP container if you want that default identity to use the host private keys:
+GitMCP runs inside the Linux MCP container. For SSH repositories, pass `privateKeyPath` when using a private key stored under `storage`. GitMCP copies that key to a temporary `0600` file before OpenSSH sees it, so broad original Storage permissions are handled internally.
+
+For HTTPS repositories, first add a token/password on the `/secrets` web page. GPT can call `list_secret_keys` to discover key names, then pass `httpUsername` and `httpPasswordSecretKey` to Git clone/fetch/pull tools. Secret values are encrypted on disk and are never returned by MCP tools.
+
+If no `privateKeyPath` is provided for SSH, OpenSSH uses the container default identity:
+
+```text
+Docker deployment: container identity, usually /root/.ssh
+```
+
+In Docker Compose deployments, mount SSH config and keys into the MCP container if you want that default identity to use mounted private keys:
 
 ```yaml
 volumes:
-  - ~/.ssh:/root/.ssh:ro
+  - ${HOME}/.ssh:/root/.ssh:ro
 ```
 
-GPT may also use a private key file placed under `storage` by passing that file as `privateKeyPath`. Do not place production-only secrets in `storage`; use task-scoped or disposable deploy keys when possible.
+GPT may also use a private key file placed under `storage` by passing that file as `privateKeyPath`. GitMCP creates a temporary restrictive key copy for the current command inside the Linux container. Do not place production-only secrets in `storage`; use task-scoped or disposable deploy keys when possible.
 
 ## 13. Recommended Usage
 

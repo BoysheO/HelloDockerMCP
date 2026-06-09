@@ -18,7 +18,10 @@ services:
     restart: always
 
   hello-docker-mcp:
-    image: mcr.microsoft.com/dotnet/sdk:10.0
+    build:
+      context: ./HelloDockerMcp
+      dockerfile: Dockerfile
+    image: hello-docker-mcp:local
     container_name: hello-docker-mcp
     working_dir: /src
     environment:
@@ -29,14 +32,18 @@ services:
       OAuth__Scope: ${HELLO_DOCKER_OAUTH_SCOPE:-mcp}
       OAuth__ResourceName: ${HELLO_DOCKER_OAUTH_RESOURCE_NAME:-Hello Docker MCP}
       Skill__Path: /skill/Skill.md
+      Secret__AdminUsername: ${HELLO_DOCKER_SECRET_ADMIN_USERNAME:-admin}
+      Secret__AdminPassword: ${HELLO_DOCKER_SECRET_ADMIN_PASSWORD:-change-this-secret-admin-password}
+      Secret__StorePath: /secrets/secrets.json
       # Storage__RootPath: /storage
     volumes:
       - ./HelloDockerMcp:/src
       - ./storage:/storage
+      - ./secret-data:/secrets
       - ./HelloDockerMcp/Skill.md:/skill/Skill.md
       - ./logs:/src/logs
-      # Optional: expose host OpenSSH defaults to GitMCP for SSH repository access.
-      # - ~/.ssh:/root/.ssh:ro
+      # Optional: expose OpenSSH defaults to GitMCP for SSH repository access.
+      # - ${HOME}/.ssh:/root/.ssh:ro
     command: sh -c "dotnet restore && dotnet run --no-restore --urls http://*:5000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]

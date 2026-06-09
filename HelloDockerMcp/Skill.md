@@ -14,7 +14,7 @@ Call trusted-registry inspection only when the user asks to check the configured
 
 Git APIs operate only inside Storage. Use `clone_git_repository` for cloning repositories, then `get_git_status`, `pull_git_repository`, `fetch_git_repository`, `list_git_branches`, and `checkout_git_branch` for repository maintenance.
 
-Git SSH defaults to the service runtime OpenSSH identity. In Docker Compose this means host keys must be mounted into the MCP container, such as `~/.ssh:/root/.ssh:ro`. If the user provides a private key file inside Storage, pass it as `privateKeyPath`; do not read or print the key content.
+Git runs inside the Linux MCP container. For SSH, use `privateKeyPath` when the user provides a private key file inside Storage; GitMCP creates a temporary 0600 key copy, so broad permissions on the original Storage key are handled internally. For HTTPS, use `httpUsername` plus `httpPasswordSecretKey`; secrets are created by a human on `/secrets`, and MCP can list secret keys with `list_secret_keys` but never read plaintext secret values.
 
 容器服务工作在沙箱环境中，创建容器、运行容器无需人工审批
 Storage服务工作在安全沙箱中，创建、列出文件无需人工审批
