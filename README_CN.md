@@ -203,10 +203,6 @@ HELLO_DOCKER_OAUTH_AUTHORIZATION_CODE_LIFETIME_SECONDS=300
 HELLO_DOCKER_OAUTH_USERNAME=admin
 HELLO_DOCKER_OAUTH_PASSWORD=change-this-password
 
-HELLO_DOCKER_PASSKEYS_ENABLED=true
-HELLO_DOCKER_PASSKEYS_RELYING_PARTY_NAME=Hello Docker MCP
-HELLO_DOCKER_PASSKEYS_RELYING_PARTY_ID=hellodockerauth.example.com
-HELLO_DOCKER_PASSKEYS_REQUIRE_USER_VERIFICATION=false
 ```
 
 正式部署时必须修改：
@@ -229,10 +225,6 @@ HELLO_DOCKER_SECRET_ADMIN_PASSWORD
 | `HELLO_DOCKER_SECRET_ADMIN_PASSWORD` | `/secrets` 密文管理页面密码，同时用于派生落盘加密密钥 |
 | `HELLO_DOCKER_OAUTH_USERNAME` | OAuth 登录用户名 |
 | `HELLO_DOCKER_OAUTH_PASSWORD` | OAuth 登录密码 |
-| `HELLO_DOCKER_PASSKEYS_ENABLED` | 是否启用 passkey 注册和登录 |
-| `HELLO_DOCKER_PASSKEYS_RELYING_PARTY_NAME` | 浏览器 passkey 提示中显示的服务名称 |
-| `HELLO_DOCKER_PASSKEYS_RELYING_PARTY_ID` | OAuth 服务公网域名，不包含协议 |
-| `HELLO_DOCKER_PASSKEYS_REQUIRE_USER_VERIFICATION` | 设为 `true` 时要求认证器完成用户验证 |
 
 ## 7. 端口与公网访问假定
 
@@ -338,10 +330,6 @@ HELLO_DOCKER_OAUTH_AUTHORIZATION_CODE_LIFETIME_SECONDS=300
 HELLO_DOCKER_OAUTH_REFRESH_TOKEN_LIFETIME_SECONDS=2592000
 HELLO_DOCKER_OAUTH_USERNAME=admin
 HELLO_DOCKER_OAUTH_PASSWORD=change-this-password
-HELLO_DOCKER_PASSKEYS_ENABLED=true
-HELLO_DOCKER_PASSKEYS_RELYING_PARTY_NAME=Hello Docker MCP
-HELLO_DOCKER_PASSKEYS_RELYING_PARTY_ID=hellodockerauth.example.com
-HELLO_DOCKER_PASSKEYS_REQUIRE_USER_VERIFICATION=false
 EOF
 
 # 4. 如不使用 frpc，或不知道 frpc 是什么，编辑 docker-compose.yml 注释 frpc 服务
@@ -504,7 +492,7 @@ Password: change-this-password
 
 在 GPT 接入 MCP 时，系统会跳转到 OAuth 授权页面。
 
-使用 `.env` 中配置的账号密码登录，或先注册 passkey 后点击 **Sign in with passkey** 登录：
+使用 `.env` 中配置的账号密码登录：
 
 ```text
 admin / change-this-password
@@ -589,3 +577,4 @@ hello world
 ```
 
 满足以上条件，即认为 HelloDockerMCP 部署成功。
+

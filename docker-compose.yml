@@ -70,14 +70,8 @@ services:
       OAuth__RefreshTokenLifetimeSeconds: ${HELLO_DOCKER_OAUTH_REFRESH_TOKEN_LIFETIME_SECONDS:-2592000}
       OAuth__Accounts__0__Username: ${HELLO_DOCKER_OAUTH_USERNAME:-admin}
       OAuth__Accounts__0__Password: ${HELLO_DOCKER_OAUTH_PASSWORD:-password}
-      Passkeys__Enabled: ${HELLO_DOCKER_PASSKEYS_ENABLED:-true}
-      Passkeys__RelyingPartyName: ${HELLO_DOCKER_PASSKEYS_RELYING_PARTY_NAME:-Hello Docker MCP}
-      Passkeys__RelyingPartyId: ${HELLO_DOCKER_PASSKEYS_RELYING_PARTY_ID:-}
-      Passkeys__CredentialStorePath: ${HELLO_DOCKER_PASSKEYS_CREDENTIAL_STORE_PATH:-/data/passkeys.json}
-      Passkeys__RequireUserVerification: ${HELLO_DOCKER_PASSKEYS_REQUIRE_USER_VERIFICATION:-false}
     volumes:
       - ./HelloDockerAuth:/src
-      - ./auth-data:/data
     command: sh -c "dotnet restore && dotnet run --no-restore --urls http://*:5001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/health"]

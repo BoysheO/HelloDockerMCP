@@ -20,12 +20,6 @@ rem Demo username/password used by the authorization server login page.
 set HELLO_DOCKER_OAUTH_USERNAME=admin
 set HELLO_DOCKER_OAUTH_PASSWORD=password
 
-rem Passkey/WebAuthn settings. Localhost is allowed for browser passkeys during local demos.
-set HELLO_DOCKER_PASSKEYS_ENABLED=true
-set HELLO_DOCKER_PASSKEYS_RELYING_PARTY_NAME=Hello Docker MCP
-set HELLO_DOCKER_PASSKEYS_RELYING_PARTY_ID=localhost
-set HELLO_DOCKER_PASSKEYS_REQUIRE_USER_VERIFICATION=false
-
 docker compose up -d --force-recreate
 
 endlocal

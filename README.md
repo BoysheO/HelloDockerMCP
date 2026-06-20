@@ -203,10 +203,6 @@ HELLO_DOCKER_OAUTH_AUTHORIZATION_CODE_LIFETIME_SECONDS=300
 HELLO_DOCKER_OAUTH_USERNAME=admin
 HELLO_DOCKER_OAUTH_PASSWORD=change-this-password
 
-HELLO_DOCKER_PASSKEYS_ENABLED=true
-HELLO_DOCKER_PASSKEYS_RELYING_PARTY_NAME=Hello Docker MCP
-HELLO_DOCKER_PASSKEYS_RELYING_PARTY_ID=hellodockerauth.example.com
-HELLO_DOCKER_PASSKEYS_REQUIRE_USER_VERIFICATION=false
 ```
 
 For production deployment, change at least the following values:
@@ -227,10 +223,6 @@ HELLO_DOCKER_SECRET_ADMIN_PASSWORD
 | `HELLO_DOCKER_SECRET_ADMIN_PASSWORD` | Password for the `/secrets` admin page and encryption key derivation |
 | `HELLO_DOCKER_OAUTH_USERNAME` | OAuth login username |
 | `HELLO_DOCKER_OAUTH_PASSWORD` | OAuth login password |
-| `HELLO_DOCKER_PASSKEYS_ENABLED` | Enables passkey registration and sign-in |
-| `HELLO_DOCKER_PASSKEYS_RELYING_PARTY_NAME` | Display name shown by the browser during passkey prompts |
-| `HELLO_DOCKER_PASSKEYS_RELYING_PARTY_ID` | Public host name of the OAuth service, without scheme |
-| `HELLO_DOCKER_PASSKEYS_REQUIRE_USER_VERIFICATION` | Requires authenticator user verification when set to `true` |
 
 ## 7. Public Access and Port Assumptions
 
@@ -336,10 +328,6 @@ HELLO_DOCKER_OAUTH_AUTHORIZATION_CODE_LIFETIME_SECONDS=300
 HELLO_DOCKER_OAUTH_REFRESH_TOKEN_LIFETIME_SECONDS=2592000
 HELLO_DOCKER_OAUTH_USERNAME=admin
 HELLO_DOCKER_OAUTH_PASSWORD=change-this-password
-HELLO_DOCKER_PASSKEYS_ENABLED=true
-HELLO_DOCKER_PASSKEYS_RELYING_PARTY_NAME=Hello Docker MCP
-HELLO_DOCKER_PASSKEYS_RELYING_PARTY_ID=hellodockerauth.example.com
-HELLO_DOCKER_PASSKEYS_REQUIRE_USER_VERIFICATION=false
 EOF
 
 # 4. If you do not use frpc, or do not know what frpc is,
@@ -503,7 +491,7 @@ Password: change-this-password
 
 When GPT connects to the MCP service, it should redirect to the OAuth authorization page.
 
-Sign in with the credentials configured in `.env`, or register a passkey first and then use **Sign in with passkey**:
+Sign in with the credentials configured in `.env`:
 
 ```text
 admin / change-this-password
@@ -586,3 +574,4 @@ echo "hello world"
 ```text
 hello world
 ```
+
