@@ -19,15 +19,16 @@
   - [11. storage 工作区定位](#11-storage-工作区定位)
   - [12. storage 可执行操作](#12-storage-可执行操作)
   - [13. 推荐使用方式](#13-推荐使用方式)
-  - [14. 敏感文件风险提示](#14-敏感文件风险提示)
+  - [14. 将本地目录暴露给 MCP 调用方](#14-将本地目录暴露给-mcp-调用方)
+  - [15. 敏感文件风险提示](#15-敏感文件风险提示)
 - [第三部分：测试](#第三部分测试)
-  - [15. GPT 接入 MCP 测试流程](#15-gpt-接入-mcp-测试流程)
-  - [16. 在 GPT 中添加 MCP 服务](#16-在-gpt-中添加-mcp-服务)
-  - [17. 完成 OAuth 授权](#17-完成-oauth-授权)
-  - [18. 让 GPT 查看可用工具](#18-让-gpt-查看可用工具)
-  - [19. 让 GPT 执行 hello world 测试](#19-让-gpt-执行-hello-world-测试)
-  - [20. 预期测试结果](#20-预期测试结果)
-  - [21. 验收标准](#21-验收标准)
+  - [16. GPT 接入 MCP 测试流程](#16-gpt-接入-mcp-测试流程)
+  - [17. 在 GPT 中添加 MCP 服务](#17-在-gpt-中添加-mcp-服务)
+  - [18. 完成 OAuth 授权](#18-完成-oauth-授权)
+  - [19. 让 GPT 查看可用工具](#19-让-gpt-查看可用工具)
+  - [20. 让 GPT 执行 hello world 测试](#20-让-gpt-执行-hello-world-测试)
+  - [21. 预期测试结果](#21-预期测试结果)
+  - [22. 验收标准](#22-验收标准)
 
 ## 1. 项目概述
 
@@ -426,7 +427,53 @@ GPT 也可以通过 `privateKeyPath` 指定已经放在 `storage` 下的私钥�
 
 这样通常能获得更好的性能体验，尤其是处理较大文件或多个文件时。
 
-## 14. 敏感文件风险提示
+## 14. 将本地目录暴露给 MCP 调用方
+
+如果需要让 MCP 服务调用方访问宿主机上的某个本地目录，不要把该目录暴露为 `storage` 之外的任意路径。应将目标目录投影到 `storage` 目录中的一个子目录，然后让 GPT 只通过该子目录访问。
+
+推荐操作步骤：
+
+1. 在 `storage` 下规划一个专用子目录名，例如：
+
+```text
+HelloDockerMCP/storage/my-project
+```
+
+2. 停止当前服务：
+
+```bash
+docker compose down
+```
+
+3. 在 `docker-compose.yml` 中，将宿主机目标目录挂载到 MCP 容器的 `/storage` 子目录下。例如，将 `/srv/projects/my-project` 暴露为 `/storage/my-project`：
+
+```yaml
+hello-docker-mcp:
+  volumes:
+    - ./storage:/storage
+    - /srv/projects/my-project:/storage/my-project
+```
+
+4. 重新启动服务：
+
+```bash
+docker compose up -d
+```
+
+5. 在 GPT 中让 MCP 通过 `my-project` 子目录访问该目录中的文件。例如：
+
+```text
+请读取 storage 中 my-project 目录下的文件列表。
+```
+
+注意事项：
+
+- 目标目录会被视为 MCP 调用方可操作的工作区。
+- 如果不希望 GPT 修改目标目录内容，可以在挂载中添加只读标记，例如 `:/storage/my-project:ro`。
+- 不要把系统目录、用户主目录、密钥目录或包含敏感数据的目录投影进 `storage`。
+- 建议只投影当前任务确实需要访问的最小目录。
+
+## 15. 敏感文件风险提示
 
 GPT 有安全防御机制。如果将敏感文件、密钥、凭据、隐私数据或高风险内容存放在 `storage` 中，GPT 对这些文件的读取、写入或处理可能会被安全防御机制阻止。
 
@@ -455,13 +502,13 @@ Token
 
 # 第三部分：测试
 
-## 15. GPT 接入 MCP 测试流程
+## 16. GPT 接入 MCP 测试流程
 
 测试目标：
 
 > 让 GPT 成功连接 `https://hellodockermcp.example.com`，并通过 MCP 调用 Docker 能力执行一次 `hello world` 命令。
 
-## 16. 在 GPT 中添加 MCP 服务
+## 17. 在 GPT 中添加 MCP 服务
 
 在 GPT 的 MCP 配置中添加服务：
 
@@ -488,7 +535,7 @@ Username: admin
 Password: change-this-password
 ```
 
-## 17. 完成 OAuth 授权
+## 18. 完成 OAuth 授权
 
 在 GPT 接入 MCP 时，系统会跳转到 OAuth 授权页面。
 
@@ -500,7 +547,7 @@ admin / change-this-password
 
 授权完成后，GPT 应显示 MCP 服务已连接。
 
-## 18. 让 GPT 查看可用工具
+## 19. 让 GPT 查看可用工具
 
 在 GPT 中输入：
 
@@ -512,7 +559,7 @@ admin / change-this-password
 
 GPT 能识别到 Docker 相关工具和 `storage` 文件操作工具。
 
-## 19. 让 GPT 执行 hello world 测试
+## 20. 让 GPT 执行 hello world 测试
 
 在 GPT 中输入：
 
@@ -528,7 +575,7 @@ echo "hello world"
 并把执行结果返回给我。
 ```
 
-## 20. 预期测试结果
+## 21. 预期测试结果
 
 GPT 最终应返回类似结果：
 
@@ -546,7 +593,7 @@ hello world
 | MCP 可连接 Docker-in-Docker | 成功 |
 | Docker 命令执行 | 成功 |
 
-## 21. 验收标准
+## 22. 验收标准
 
 最终验收条件：
 

@@ -19,15 +19,16 @@ English | [简体中文](./README_CN.md)
   - [11. storage Workspace Location](#11-storage-workspace-location)
   - [12. Available storage Operations](#12-available-storage-operations)
   - [13. Recommended Usage](#13-recommended-usage)
-  - [14. Sensitive File Warning](#14-sensitive-file-warning)
+  - [14. Expose a Local Directory to MCP Callers](#14-expose-a-local-directory-to-mcp-callers)
+  - [15. Sensitive File Warning](#15-sensitive-file-warning)
 - [Part 3: Testing](#part-3-testing)
-  - [15. GPT MCP Connection Test](#15-gpt-mcp-connection-test)
-  - [16. Add the MCP Service in GPT](#16-add-the-mcp-service-in-gpt)
-  - [17. Complete OAuth Authorization](#17-complete-oauth-authorization)
-  - [18. Ask GPT to List Available Tools](#18-ask-gpt-to-list-available-tools)
-  - [19. Ask GPT to Run a hello world Command](#19-ask-gpt-to-run-a-hello-world-command)
-  - [20. Expected Result](#20-expected-result)
-  - [21. Acceptance Criteria](#21-acceptance-criteria)
+  - [16. GPT MCP Connection Test](#16-gpt-mcp-connection-test)
+  - [17. Add the MCP Service in GPT](#17-add-the-mcp-service-in-gpt)
+  - [18. Complete OAuth Authorization](#18-complete-oauth-authorization)
+  - [19. Ask GPT to List Available Tools](#19-ask-gpt-to-list-available-tools)
+  - [20. Ask GPT to Run a hello world Command](#20-ask-gpt-to-run-a-hello-world-command)
+  - [21. Expected Result](#21-expected-result)
+  - [22. Acceptance Criteria](#22-acceptance-criteria)
 
 ## 1. Overview
 
@@ -425,7 +426,53 @@ Ask GPT to read or process them through MCP
 
 This usually provides a better performance experience than asking GPT to upload files through MCP, especially for large files or many files.
 
-## 14. Sensitive File Warning
+## 14. Expose a Local Directory to MCP Callers
+
+If you need MCP callers to access a local directory on the host machine, do not expose that directory as an arbitrary path outside `storage`. Project the target directory into a subdirectory under `storage`, then ask GPT to access it only through that subdirectory.
+
+Recommended steps:
+
+1. Choose a dedicated subdirectory name under `storage`, for example:
+
+```text
+HelloDockerMCP/storage/my-project
+```
+
+2. Stop the current services:
+
+```bash
+docker compose down
+```
+
+3. In `docker-compose.yml`, mount the host target directory into a `/storage` subdirectory in the MCP container. For example, expose `/srv/projects/my-project` as `/storage/my-project`:
+
+```yaml
+hello-docker-mcp:
+  volumes:
+    - ./storage:/storage
+    - /srv/projects/my-project:/storage/my-project
+```
+
+4. Start the services again:
+
+```bash
+docker compose up -d
+```
+
+5. In GPT, ask MCP to access files through the `my-project` subdirectory. Example:
+
+```text
+Please list the files under the my-project directory in storage.
+```
+
+Notes:
+
+- The target directory is treated as a workspace that MCP callers can operate.
+- If GPT should not modify the target directory, add a read-only marker to the mount, for example `:/storage/my-project:ro`.
+- Do not project system directories, home directories, key directories, or directories containing sensitive data into `storage`.
+- Project only the smallest directory needed for the current task.
+
+## 15. Sensitive File Warning
 
 GPT has safety protection mechanisms. If sensitive files, credentials, private data, or high-risk content are placed in `storage`, GPT may be blocked by safety protections when reading, writing, or processing these files.
 
@@ -454,13 +501,13 @@ business-sensitive data
 
 # Part 3: Testing
 
-## 15. GPT MCP Connection Test
+## 16. GPT MCP Connection Test
 
 Test objective:
 
 > Connect GPT to `https://hellodockermcp.example.com`, then ask GPT to call Docker through MCP and run a `hello world` command.
 
-## 16. Add the MCP Service in GPT
+## 17. Add the MCP Service in GPT
 
 Add the MCP service in GPT's MCP configuration:
 
@@ -487,7 +534,7 @@ Username: admin
 Password: change-this-password
 ```
 
-## 17. Complete OAuth Authorization
+## 18. Complete OAuth Authorization
 
 When GPT connects to the MCP service, it should redirect to the OAuth authorization page.
 
@@ -499,7 +546,7 @@ admin / change-this-password
 
 After authorization, GPT should show that the MCP service is connected.
 
-## 18. Ask GPT to List Available Tools
+## 19. Ask GPT to List Available Tools
 
 Ask GPT:
 
@@ -511,7 +558,7 @@ Expected result:
 
 GPT should recognize Docker-related tools and `storage` file operation tools.
 
-## 19. Ask GPT to Run a hello world Command
+## 20. Ask GPT to Run a hello world Command
 
 Ask GPT:
 
@@ -527,7 +574,7 @@ echo "hello world"
 Then return the execution result to me.
 ```
 
-## 20. Expected Result
+## 21. Expected Result
 
 GPT should return a result similar to:
 
@@ -545,7 +592,7 @@ If GPT returns `hello world`, the following checks have passed:
 | MCP can connect to Docker-in-Docker | Passed |
 | Docker command execution | Passed |
 
-## 21. Acceptance Criteria
+## 22. Acceptance Criteria
 
 Deployment is considered successful when all of the following are true:
 
