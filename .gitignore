@@ -16,3 +16,5 @@ storage/*
 # Ignore persisted auth credentials
 auth-data/
 secret-data/
+# Ignore sth included secret
+.env
